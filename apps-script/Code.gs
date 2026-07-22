@@ -7,8 +7,8 @@ const APP={
 function doGet(){return HtmlService.createTemplateFromFile('Index').evaluate().setTitle('AAIX Closing').setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL).addMetaTag('viewport','width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover')}
 function include_(n){return HtmlService.createHtmlOutputFromFile(n).getContent()}
 function setupClosingApp(){
-  const p=PropertiesService.getScriptProperties(),id=p.getProperty('CLOSING_SPREADSHEET_ID'),password=p.getProperty('INITIAL_ADMIN_PASSWORD');
-  if(!id)throw new Error('Set CLOSING_SPREADSHEET_ID in Script Properties.');if(!password||password.length<6)throw new Error('Set INITIAL_ADMIN_PASSWORD with at least 6 characters.');
+  const p=PropertiesService.getScriptProperties(),password=p.getProperty('INITIAL_ADMIN_PASSWORD');
+  if(!password||password.length<6)throw new Error('Set INITIAL_ADMIN_PASSWORD with at least 6 characters.');
   const sh=db_().getSheetByName(APP.SHEETS.users),u=rows_(sh).find(x=>norm_(x.Email)==='santiagopiedrae@gmail.com');if(!u)throw new Error('Admin user is missing.');
   const salt=Utilities.getUuid();update_(sh,'Email',u.Email,{PasswordHash:hash_(salt+password),Salt:salt,MustChange:true,UpdatedAt:new Date()});photoRoot_();return 'Closing app initialized.'
 }
@@ -38,7 +38,7 @@ function photoRoot_(){const name='Closing Van Inspection Photos',it=DriveApp.get
 function folder_(p,n){const it=p.getFoldersByName(n);return it.hasNext()?it.next():p.createFolder(n)}
 function editable_(i,email){if(!i)throw new Error('Inspection not found.');if(i.InspectionState!=='In Progress')throw new Error('Inspection is no longer editable.');if(norm_(i.UserEmail)!==norm_(email))throw new Error('Inspection belongs to another user.')}
 function audit_(email,action,type,id,details){append_(db_().getSheetByName(APP.SHEETS.audit),{EventID:Utilities.getUuid(),Timestamp:new Date(),UserEmail:email,Action:action,EntityType:type,EntityID:id,Details:details||''})}
-function db_(){const id=PropertiesService.getScriptProperties().getProperty('CLOSING_SPREADSHEET_ID');if(!id)throw new Error('CLOSING_SPREADSHEET_ID is not configured.');return SpreadsheetApp.openById(id)}
+function db_(){const id=PropertiesService.getScriptProperties().getProperty('CLOSING_SPREADSHEET_ID');if(id)return SpreadsheetApp.openById(id);const active=SpreadsheetApp.getActiveSpreadsheet();if(active)return active;throw new Error('The Apps Script project must be attached to the CLOSING spreadsheet.')}
 function rows_(sh){if(!sh||sh.getLastRow()<2)return[];const v=sh.getDataRange().getValues(),h=v.shift().map(String);return v.filter(r=>r.some(x=>x!==''&&x!==null)).map(r=>h.reduce((o,k,i)=>(o[k]=r[i]instanceof Date?r[i].toISOString():r[i],o),{}))}
 function append_(sh,o){const h=sh.getRange(1,1,1,sh.getLastColumn()).getValues()[0].map(String);sh.appendRow(h.map(k=>Object.prototype.hasOwnProperty.call(o,k)?o[k]:''))}
 function update_(sh,key,val,c){const d=sh.getDataRange().getValues(),h=d[0].map(String),kc=h.indexOf(key);for(let r=1;r<d.length;r++)if(String(d[r][kc])===String(val)){Object.keys(c).forEach(k=>{const x=h.indexOf(k);if(x>=0)sh.getRange(r+1,x+1).setValue(c[k])});return true}return false}
