@@ -1,0 +1,9 @@
+{
+  "name": "AAIX Closing",
+  "short_name": "Closing",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f4f7fa",
+  "theme_color": "#173f5f",
+  "description": "AAIX van closing and inspection app"
+}
