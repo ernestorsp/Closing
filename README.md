@@ -1,4 +1,4 @@
-# AAIX Closing
+# AAlX Closing
 
 Mobile-first Google Apps Script web app for daily van closing inspections.
 
