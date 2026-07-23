@@ -4,7 +4,7 @@ const APP={
   PARTS:['Front','Rear','Driver Side','Passenger Side','Cargo Interior','Cabin Interior'],
   DAMAGE:['No Damage','Existing Damage','New Damage']
 };
-function doGet(){return HtmlService.createTemplateFromFile('Index').evaluate().setTitle('AAIX Closing').setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL).addMetaTag('viewport','width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover')}
+function doGet(){return HtmlService.createTemplateFromFile('Index').evaluate().setTitle('AAlX Closing').setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL).addMetaTag('viewport','width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover')}
 function include_(n){return HtmlService.createHtmlOutputFromFile(n).getContent()}
 function setupClosingApp(){
   const p=PropertiesService.getScriptProperties(),password=p.getProperty('INITIAL_ADMIN_PASSWORD');
