@@ -14,10 +14,13 @@ Mobile-first Google Apps Script web app for daily van closing inspections.
 - Location-change confirmation
 - Operational, Downed, and Grounded statuses
 - Inspection history and audit log
+- Daily rescues saved in one batch
+- Daily closing data with automatic van-status counts
+- Closing notes unlocked after every checklist item is ready
 
 ## Google Sheet
 
-The app expects these tabs: CONFIG, USERS, VANS, SPOTS, INSPECTIONS, PHOTOS, DAMAGES, AUDIT_LOG, and LISTS.
+The app expects these tabs: CONFIG, USERS, VANS, SPOTS, INSPECTIONS, PHOTOS, DAMAGES, AUDIT_LOG, LISTS, RESCUE_DRIVERS, RESCUES, DAILY_RESCUE_DRIVERS, RESCUES DJX3, RESCUES DJX4, DAILY_CLOSING, and CLOSING_NOTES. DAILY_CLOSING and CLOSING_NOTES are created automatically when the app loads.
 
 Populate VANS and SPOTS before operational use. SHOP must not be added to SPOTS.
 
