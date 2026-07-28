@@ -46,7 +46,7 @@ Do not commit the spreadsheet ID, passwords, session tokens, or deployment secre
 ## Initial data
 
 - USERS already contains the initial admin row in the Sheet.
-- Inspection skip requests are emailed to every active USERS row whose Role is `Admin`. An Admin must open the review link and sign in with their Closing app email and password before approving or denying.
+- Inspection skip requests are emailed to every active USERS row whose Role is `Admin`. The email contains private one-tap `YES — APPROVE` and `NO — DENY` links; the first response closes the request.
 - VANS requires one row per active van with a unique VanID.
 - SPOTS requires one active row per selectable DJX3 or DJX4 spot.
 - A spot can be occupied by only one van.
