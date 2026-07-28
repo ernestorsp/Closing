@@ -18,10 +18,12 @@ Mobile-first Google Apps Script web app for daily van closing inspections.
 - Daily closing data with automatic van-status counts
 - Closing notes unlocked after every checklist item is ready
 - HTML Closing Notes email with table formatting and up to six photo attachments
+- Late RTS driver lists grouped with the current station first, followed by the other station
+- Admin email approval workflow for skipping the remaining daily inspections
 
 ## Google Sheet
 
-The app expects these tabs: CONFIG, USERS, VANS, SPOTS, INSPECTIONS, PHOTOS, DAMAGES, AUDIT_LOG, LISTS, RESCUE_DRIVERS, RESCUES, DAILY_RESCUE_DRIVERS, RESCUES DJX3, RESCUES DJX4, DAILY_CLOSING, and CLOSING_NOTES. DAILY_CLOSING and CLOSING_NOTES are created automatically when the app loads.
+The app expects these tabs: CONFIG, USERS, VANS, SPOTS, INSPECTIONS, PHOTOS, DAMAGES, AUDIT_LOG, LISTS, RESCUE_DRIVERS, RESCUES, DAILY_RESCUE_DRIVERS, RESCUES DJX3, RESCUES DJX4, DAILY_CLOSING, CLOSING_NOTES, and INSPECTION_SKIP_REQUESTS. The last three are created automatically when the app loads.
 
 Populate VANS and SPOTS before operational use. SHOP must not be added to SPOTS.
 
@@ -44,6 +46,7 @@ Do not commit the spreadsheet ID, passwords, session tokens, or deployment secre
 ## Initial data
 
 - USERS already contains the initial admin row in the Sheet.
+- Inspection skip requests are emailed to every active USERS row whose Role is `Admin`. An Admin must open the review link and sign in with their Closing app email and password before approving or denying.
 - VANS requires one row per active van with a unique VanID.
 - SPOTS requires one active row per selectable DJX3 or DJX4 spot.
 - A spot can be occupied by only one van.
