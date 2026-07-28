@@ -184,7 +184,7 @@ function parseCsv_(text){
   return{headers:rows[0].map(x=>String(x).trim()),rows:rows.slice(1)};
 }
 function parseXlsx_(blob){
-  let files;try{files=Utilities.unzip(blob)}catch(e){throw new Error('The XLSX file is damaged or cannot be opened.')}
+  let files;try{blob.setContentType('application/zip');files=Utilities.unzip(blob)}catch(e){throw new Error('The XLSX file is damaged or cannot be opened.')}
   const byName={};files.forEach(f=>byName[f.getName()]=f);
   const sheetName=Object.keys(byName).filter(n=>/^xl\/worksheets\/sheet\d+\.xml$/.test(n)).sort()[0];
   if(!sheetName)throw new Error('The XLSX file does not contain a readable worksheet.');
