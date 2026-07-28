@@ -63,9 +63,9 @@ function createUserInvitation(token,input){
   if(existing)update_(users,'Email',existing.Email,record);else append_(users,record);
   const url=ScriptApp.getService().getUrl();
   if(!url)throw new Error('Deploy the project as a Web App before sending invitations.');
-  const link=url+'?invite='+encodeURIComponent(raw),subject='Invitation to AAlX Closing';
-  const html='<div style="font-family:Arial,sans-serif;color:#18303f;max-width:620px"><h2 style="color:#173f5f">AAlX Closing invitation</h2><p>Hello <b>'+html_(v.name)+'</b>,</p><p>You were invited as <b>'+html_(v.role)+'</b> with access to <b>'+html_(v.stationAccess)+'</b>.</p><p><a href="'+html_(link)+'" style="display:inline-block;background:#1f9aaa;color:#fff;text-decoration:none;padding:14px 20px;border-radius:9px;font-weight:bold">ACCEPT INVITATION</a></p><p style="font-size:12px;color:#687b86">This private link expires in 72 hours and can be used once.</p></div>';
-  MailApp.sendEmail({to:v.email,subject,body:'Accept your AAlX Closing invitation: '+link,htmlBody:html,name:'AAlX Closing'});
+  const link=url+'?invite='+encodeURIComponent(raw),subject='Invitation to AAXI Closing';
+  const html='<div style="font-family:Arial,sans-serif;color:#18303f;max-width:620px"><h2 style="color:#173f5f">AAXI Closing invitation</h2><p>Hello <b>'+html_(v.name)+'</b>,</p><p>You were invited as <b>'+html_(v.role)+'</b> with access to <b>'+html_(v.stationAccess)+'</b>.</p><p><a href="'+html_(link)+'" style="display:inline-block;background:#1f9aaa;color:#fff;text-decoration:none;padding:14px 20px;border-radius:9px;font-weight:bold">ACCEPT INVITATION</a></p><p style="font-size:12px;color:#687b86">This private link expires in 72 hours and can be used once.</p></div>';
+  MailApp.sendEmail({to:v.email,subject,body:'Accept your AAXI Closing invitation: '+link,htmlBody:html,name:'AAXI Closing'});
   audit_(a.s.email,'INVITE_USER','USER',v.email,v.role+' · '+v.stationAccess);
   return{ok:true,message:'Invitation sent to '+v.email+'.'};
 }
@@ -107,7 +107,7 @@ function requestPasswordReset(email){
   if(!u||!yes_(u.Active))return{ok:true,message:'If that email has an active account, a code was sent.'};
   const code=String(Math.floor(100000+Math.random()*900000)),now=new Date();
   append_(ss.getSheetByName('PASSWORD_RESET_REQUESTS'),{RequestID:Utilities.getUuid(),Email:email,CodeHash:hash_(email+'|'+code),Status:'Pending',CreatedAt:now,ExpiresAt:new Date(Date.now()+15*60*1000)});
-  MailApp.sendEmail({to:email,subject:'AAlX Closing password code',body:'Your AAlX Closing password reset code is '+code+'. It expires in 15 minutes.',htmlBody:'<div style="font-family:Arial,sans-serif;color:#18303f"><h2>Password reset</h2><p>Your verification code is:</p><div style="font-size:32px;font-weight:bold;letter-spacing:7px;color:#173f5f">'+code+'</div><p>This code expires in 15 minutes and can be used once.</p></div>',name:'AAlX Closing'});
+  MailApp.sendEmail({to:email,subject:'AAXI Closing password code',body:'Your AAXI Closing password reset code is '+code+'. It expires in 15 minutes.',htmlBody:'<div style="font-family:Arial,sans-serif;color:#18303f"><h2>Password reset</h2><p>Your verification code is:</p><div style="font-size:32px;font-weight:bold;letter-spacing:7px;color:#173f5f">'+code+'</div><p>This code expires in 15 minutes and can be used once.</p></div>',name:'AAXI Closing'});
   return{ok:true,message:'If that email has an active account, a code was sent.'};
 }
 function resetPasswordWithCode(email,code,newPassword){
