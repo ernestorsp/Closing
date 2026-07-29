@@ -31,7 +31,7 @@ function revokeUserSessions_(email){
 function getAdminData(token){
   const a=requireAdmin_(token),ss=db_();ensureAdminSheets_(ss);
   return{
-    users:rows_(ss.getSheetByName(APP.SHEETS.users)).map(u=>({
+    users:rows_(ss.getSheetByName(APP.SHEETS.users)).filter(u=>norm_(u.Email)).map(u=>({
       email:norm_(u.Email),name:String(u.Name||''),role:String(u.Role||'User'),
       defaultStation:String(u.DefaultStation||'DJX3'),stationAccess:String(u.StationAccess||'Both'),
       active:yes_(u.Active),updatedAt:u.UpdatedAt||'',isSelf:norm_(u.Email)===a.s.email
