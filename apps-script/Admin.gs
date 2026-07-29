@@ -28,9 +28,24 @@ function revokeUserSessions_(email){
     try{if(norm_(JSON.parse(all[k]).email)===target)p.deleteProperty(k)}catch(e){}
   });
 }
+function importUpdateKey_(type,station){return 'CLOSING_LAST_'+String(type||'').toUpperCase()+(station?'_'+String(station).toUpperCase():'')}
+function saveImportUpdate_(type,station,user,email){
+  PropertiesService.getScriptProperties().setProperty(importUpdateKey_(type,station),JSON.stringify({
+    at:new Date().toISOString(),email:norm_(email),name:String(user&&user.Name||'').trim()
+  }));
+}
+function getImportUpdate_(type,station){
+  const raw=PropertiesService.getScriptProperties().getProperty(importUpdateKey_(type,station));
+  if(!raw)return null;
+  try{return JSON.parse(raw)}catch(e){return null}
+}
 function getAdminData(token){
   const a=requireAdmin_(token),ss=db_();ensureAdminSheets_(ss);
   return{
+    lastUpdates:{
+      drivers:{DJX3:getImportUpdate_('drivers','DJX3'),DJX4:getImportUpdate_('drivers','DJX4')},
+      vans:getImportUpdate_('vans')
+    },
     users:rows_(ss.getSheetByName(APP.SHEETS.users)).filter(u=>norm_(u.Email)).map(u=>({
       email:norm_(u.Email),name:String(u.Name||''),role:String(u.Role||'User'),
       defaultStation:String(u.DefaultStation||'DJX3'),stationAccess:String(u.StationAccess||'Both'),
@@ -142,6 +157,7 @@ function importDriversFile(token,station,file){
     existing.filter(x=>String(x.Station).toUpperCase()===station&&!seen.has(String(x.DriverID))).forEach(x=>update_(sh,'DriverID',x.DriverID,{Active:false,UpdatedAt:new Date()}));
     items.forEach(x=>{const old=byId.get(x.DriverID);if(old)update_(sh,'DriverID',old.DriverID,x);else append_(sh,x)});
     const active=items.filter(x=>x.Active).length;audit_(a.s.email,'IMPORT_DRIVERS','DRIVER',station,items.length+' rows · '+active+' active');
+    saveImportUpdate_('drivers',station,a.u,a.s.email);
     return{ok:true,total:items.length,active,inactive:items.length-active,message:station+' drivers updated: '+active+' active, '+(items.length-active)+' inactive.'};
   });
 }
@@ -164,6 +180,7 @@ function importVansFile(token,file){
     });
     const active=items.filter(x=>x.Active).length,stations={DJX3:items.filter(x=>x.Active&&x.HomeStation==='DJX3').length,DJX4:items.filter(x=>x.Active&&x.HomeStation==='DJX4').length};
     audit_(a.s.email,'IMPORT_VANS','VAN','ALL',items.length+' rows · DJX3 '+stations.DJX3+' · DJX4 '+stations.DJX4);
+    saveImportUpdate_('vans','',a.u,a.s.email);
     return{ok:true,total:items.length,active,stations,message:'Vans updated: '+stations.DJX3+' DJX3 and '+stations.DJX4+' DJX4 active.'};
   });
 }
