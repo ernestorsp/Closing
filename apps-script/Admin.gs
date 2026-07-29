@@ -1,4 +1,4 @@
-const ADMIN_ROLES=['Admin','User'];
+const ADMIN_ROLES=['Admin','Lead'];
 const STATION_SCOPES=['DJX3','DJX4','Both'];
 
 function ensureAdminSheets_(ss){
@@ -20,8 +20,9 @@ function allowedStations_(u){
   return APP.WORK_STATIONS.includes(value)?[value]:APP.WORK_STATIONS.slice();
 }
 function publicUser_(u){
-  return{email:norm_(u.Email),name:String(u.Name||''),role:String(u.Role||'User'),station:workingStation_(u),stationAccess:String(u.StationAccess||'Both'),allowedStations:allowedStations_(u),isAdmin:isAdmin_(u)};
+  return{email:norm_(u.Email),name:String(u.Name||''),role:managedRole_(u.Role),station:workingStation_(u),stationAccess:String(u.StationAccess||'Both'),allowedStations:allowedStations_(u),isAdmin:isAdmin_(u)};
 }
+function managedRole_(role){return String(role||'Lead')==='User'?'Lead':String(role||'Lead')}
 function revokeUserSessions_(email){
   const p=PropertiesService.getScriptProperties(),all=p.getProperties(),target=norm_(email);
   Object.keys(all).filter(k=>k.indexOf('CLOSE_SESSION_')===0).forEach(k=>{
@@ -47,19 +48,19 @@ function getAdminData(token){
       vans:getImportUpdate_('vans')
     },
     users:rows_(ss.getSheetByName(APP.SHEETS.users)).filter(u=>norm_(u.Email)).map(u=>({
-      email:norm_(u.Email),name:String(u.Name||''),role:String(u.Role||'User'),
+      email:norm_(u.Email),name:String(u.Name||''),role:managedRole_(u.Role),
       defaultStation:String(u.DefaultStation||'DJX3'),stationAccess:String(u.StationAccess||'Both'),
       active:yes_(u.Active),updatedAt:u.UpdatedAt||'',isSelf:norm_(u.Email)===a.s.email
     })).sort((x,y)=>Number(y.active)-Number(x.active)||x.name.localeCompare(y.name)),
     permissions:[
       {role:'Admin',access:'All Closing pages, History, Update, invitations and user management'},
-      {role:'User',access:'Daily Closing pages for the assigned station(s); no History or administration'}
+      {role:'Lead',access:'Daily Closing pages for the assigned station(s); no History or administration'}
     ]
   };
 }
 function validateManagedUser_(input){
   input=input||{};
-  const email=norm_(input.email),name=String(input.name||'').trim(),role=String(input.role||'User'),stationAccess=String(input.stationAccess||'Both'),defaultStation=String(input.defaultStation||'DJX3').toUpperCase();
+  const email=norm_(input.email),name=String(input.name||'').trim(),role=managedRole_(input.role),stationAccess=String(input.stationAccess||'Both'),defaultStation=String(input.defaultStation||'DJX3').toUpperCase();
   if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email))throw new Error('Enter a valid email.');
   if(!name)throw new Error('Enter the user name.');
   if(!ADMIN_ROLES.includes(role))throw new Error('Invalid role.');
@@ -91,7 +92,7 @@ function acceptUserInvitation(rawToken,newPassword){
     const invitation=rows_(ss.getSheetByName('USER_INVITATIONS')).find(x=>x.Status==='Pending'&&equal_(x.TokenHash,hash_(String(rawToken||''))));
     if(!invitation||new Date(invitation.ExpiresAt).getTime()<Date.now())throw new Error('This invitation is invalid or expired.');
     const salt=Utilities.getUuid(),now=new Date(),sh=ss.getSheetByName(APP.SHEETS.users);
-    update_(sh,'Email',invitation.Email,{Name:invitation.Name,Role:invitation.Role,DefaultStation:invitation.DefaultStation,StationAccess:invitation.StationAccess,Active:true,PasswordHash:hash_(salt+newPassword),Salt:salt,MustChange:false,UpdatedAt:now});
+    update_(sh,'Email',invitation.Email,{Name:invitation.Name,Role:managedRole_(invitation.Role),DefaultStation:invitation.DefaultStation,StationAccess:invitation.StationAccess,Active:true,PasswordHash:hash_(salt+newPassword),Salt:salt,MustChange:false,UpdatedAt:now});
     update_(ss.getSheetByName('USER_INVITATIONS'),'InvitationID',invitation.InvitationID,{Status:'Accepted',AcceptedAt:now});
     audit_(invitation.Email,'ACCEPT_INVITATION','USER',invitation.Email,'');
     return{ok:true,message:'Account activated. You can sign in now.'};
