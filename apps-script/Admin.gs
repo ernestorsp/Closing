@@ -117,6 +117,20 @@ function removeManagedUser(token,email){
   sh.deleteRow(row+1);
   return{ok:true,message:'User permanently removed.'};
 }
+function removeManagedVan(token,vanId){
+  const a=requireAdmin_(token),target=String(vanId||'').trim();
+  if(!target)throw new Error('Van not found.');
+  return lock_(()=>{
+    const ss=db_(),sh=ss.getSheetByName(APP.SHEETS.vans),data=sh.getDataRange().getValues(),headers=data[0].map(String),idCol=headers.indexOf('VanID'),row=data.findIndex((x,i)=>i>0&&String(x[idCol])===target);
+    if(row<1)throw new Error('Van not found.');
+    const vanNumber=String(data[row][headers.indexOf('VanNumber')]||target),inProgress=rowsTail_(ss.getSheetByName(APP.SHEETS.inspections),1200).some(x=>String(x.VanID)===target&&x.InspectionState==='In Progress');
+    if(inProgress)throw new Error('This van has an inspection in progress. Finish it before removing the van.');
+    clearVanSpot_(ss,target);
+    sh.deleteRow(row+1);
+    audit_(a.s.email,'REMOVE_VAN','VAN',target,'Van '+vanNumber+' removed from fleet');
+    return{ok:true,message:'Van '+vanNumber+' permanently removed from the fleet.'};
+  });
+}
 function requestPasswordReset(email){
   email=norm_(email);rate_('reset_'+email);
   const ss=db_();ensureAdminSheets_(ss);const u=user_(email);
@@ -174,14 +188,16 @@ function importVansFile(token,file){
   if(!items.length)throw new Error('No vans were found in the uploaded file.');
   return lock_(()=>{
     const ss=db_();ensureAdminSheets_(ss);const sh=ss.getSheetByName(APP.SHEETS.vans),existing=rows_(sh),byId=new Map(existing.map(x=>[String(x.VanID).toUpperCase(),x]));
+    let added=0;
     items.forEach(x=>{
-      const old=byId.get(x.VanID),record={VanID:x.VanID,VanNumber:x.VanNumber,VanType:x.VanType,HomeStation:x.HomeStation,CurrentStation:old&&old.CurrentStation?old.CurrentStation:x.HomeStation,CurrentSpot:old?old.CurrentSpot:'',CurrentStatus:old&&old.CurrentStatus?old.CurrentStatus:x.SourceOperationalStatus,Active:x.Active,LastInspectionAt:old?old.LastInspectionAt:'',LastInspectionID:old?old.LastInspectionID:'',UpdatedAt:new Date()};
-      if(old)update_(sh,'VanID',old.VanID,record);else append_(sh,record);
+      if(byId.has(x.VanID))return;
+      append_(sh,{VanID:x.VanID,VanNumber:x.VanNumber,VanType:x.VanType,HomeStation:x.HomeStation,CurrentStation:x.HomeStation,CurrentSpot:'',CurrentStatus:x.SourceOperationalStatus,Active:x.Active,LastInspectionAt:'',LastInspectionID:'',UpdatedAt:new Date()});
+      added++;
     });
-    const active=items.filter(x=>x.Active).length,stations={DJX3:items.filter(x=>x.Active&&x.HomeStation==='DJX3').length,DJX4:items.filter(x=>x.Active&&x.HomeStation==='DJX4').length};
-    audit_(a.s.email,'IMPORT_VANS','VAN','ALL',items.length+' rows · DJX3 '+stations.DJX3+' · DJX4 '+stations.DJX4);
+    const unchanged=items.length-added,active=items.filter(x=>x.Active).length,stations={DJX3:items.filter(x=>x.Active&&x.HomeStation==='DJX3').length,DJX4:items.filter(x=>x.Active&&x.HomeStation==='DJX4').length};
+    audit_(a.s.email,'IMPORT_VANS','VAN','ALL',items.length+' rows · '+added+' new · '+unchanged+' unchanged');
     saveImportUpdate_('vans','',a.u,a.s.email);
-    return{ok:true,total:items.length,active,stations,message:'Vans updated: '+stations.DJX3+' DJX3 and '+stations.DJX4+' DJX4 active.'};
+    return{ok:true,total:items.length,added,unchanged,active,stations,message:'Vans checked: '+added+' new added; '+unchanged+' existing vans left unchanged.'};
   });
 }
 function parseUploadTable_(file){
