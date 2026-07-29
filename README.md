@@ -55,7 +55,7 @@ Do not commit the spreadsheet ID, passwords, session tokens, or deployment secre
 
 - USERS already contains the initial admin row in the Sheet.
 - `Admin` users can access every page, History, Update, invitations, and user management.
-- `User` users can access daily Closing functions but cannot access History or administration.
+- `Lead` users can access daily Closing functions but cannot access History or administration.
 - Station access for a user can be `DJX3`, `DJX4`, or `Both`.
 - Inspection skip requests are emailed to every active USERS row whose Role is `Admin`. The email contains private one-tap `YES — APPROVE` and `NO — DENY` links; the first response closes the request.
 - VANS requires one row per active van with a unique VanID.
