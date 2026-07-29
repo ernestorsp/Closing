@@ -96,10 +96,11 @@ function updateManagedUser(token,input){
 function removeManagedUser(token,email){
   const a=requireAdmin_(token),ss=db_(),target=norm_(email);
   if(target===a.s.email)throw new Error('You cannot remove your own account.');
-  const u=user_(target);if(!u)throw new Error('User not found.');
-  update_(ss.getSheetByName(APP.SHEETS.users),'Email',u.Email,{Active:false,UpdatedAt:new Date()});
-  revokeUserSessions_(target);audit_(a.s.email,'REMOVE_USER','USER',target,'Deactivated');
-  return{ok:true,message:'User removed from app access.'};
+  const sh=ss.getSheetByName(APP.SHEETS.users),data=sh.getDataRange().getValues(),headers=data[0].map(String),emailCol=headers.indexOf('Email'),row=data.findIndex((x,i)=>i>0&&norm_(x[emailCol])===target);
+  if(row<1)throw new Error('User not found.');
+  revokeUserSessions_(target);audit_(a.s.email,'REMOVE_USER','USER',target,'Deleted from USERS');
+  sh.deleteRow(row+1);
+  return{ok:true,message:'User permanently removed.'};
 }
 function requestPasswordReset(email){
   email=norm_(email);rate_('reset_'+email);
