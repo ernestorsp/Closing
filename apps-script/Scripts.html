@@ -9,6 +9,8 @@ function saveSessionToken(token){token?localStorage.setItem('closing_token',toke
 function notifyAppReady(){if(window.top!==window)window.top.postMessage({type:'aaxi-closing-ready'},'*')}
 function bind(){
  document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>showPage(b.dataset.page));
+ document.addEventListener('focusin',moveDriverCaretToEnd);
+ document.addEventListener('pointerup',moveDriverCaretToEnd);
  document.getElementById('loginForm').onsubmit=e=>{e.preventDefault();const x=form(e.target);setBusy(true);google.script.run.withSuccessHandler(r=>{TOKEN=r.token;saveSessionToken(TOKEN);setBusy(false);if(r.mustChange){document.getElementById('loginForm').hidden=true;document.getElementById('passwordForm').hidden=false}else loadApp()}).withFailureHandler(failBusy).login(x.email,x.password)};
  document.getElementById('passwordForm').onsubmit=e=>{e.preventDefault();const x=form(e.target);setBusy(true);google.script.run.withSuccessHandler(()=>{toast('Password updated.');setBusy(false);loadApp()}).withFailureHandler(failBusy).changePassword(TOKEN,x.currentPassword,x.newPassword)};
  document.getElementById('forgotForm').onsubmit=e=>{e.preventDefault();const x=form(e.target);setBusy(true);google.script.run.withSuccessHandler(r=>{setBusy(false);document.querySelector('#resetForm [name=email]').value=x.email;showAuthForm('resetForm');toast(r.message)}).withFailureHandler(failBusy).requestPasswordReset(x.email)};
@@ -25,6 +27,7 @@ function bind(){
  document.querySelectorAll('[name=newDamage]').forEach(x=>x.onchange=damageChoiceChanged);
  document.getElementById('damagePhoto').onchange=captureDamage;
 }
+function moveDriverCaretToEnd(event){const input=event.target;if(!input.matches||!input.matches('input.driverFilter'))return;requestAnimationFrame(()=>{const end=input.value.length;try{input.setSelectionRange(end,end)}catch(e){}})}
 function cacheDay(v){const d=new Date(v||Date.now());return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
 function readAppCache(){try{const saved=JSON.parse(localStorage.getItem(APP_CACHE_KEY)||'null');if(!saved||!saved.data||!saved.data.user||cacheDay(saved.savedAt)!==cacheDay())return null;return saved.data}catch(e){localStorage.removeItem(APP_CACHE_KEY);return null}}
 function saveAppCache(data){try{localStorage.setItem(APP_CACHE_KEY,JSON.stringify({savedAt:Date.now(),data}))}catch(e){}}
