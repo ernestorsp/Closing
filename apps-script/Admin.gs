@@ -1,5 +1,9 @@
 const ADMIN_ROLES=['Admin','Lead'];
 const STATION_SCOPES=['DJX3','DJX4','Both'];
+const INVITATION_MANUALS=[
+  {id:'1-mNpblkYym6Woc9E1tq7ua0pYwcXHBTD',name:'Closing_APP_Lead_User_Manual_EN.pdf'},
+  {id:'17hVTB1UdV9t8EqWlRN6SrkVVSbBryK0Y',name:'Manual_APP_Closing_Lead.pdf'}
+];
 
 function ensureAdminSheets_(ss){
   ensureSheet_(ss,APP.SHEETS.users,['Email','Name','Role','DefaultStation','StationAccess','Active','PasswordHash','Salt','MustChange','InvitedAt','InvitedBy','LastLoginAt','UpdatedAt']);
@@ -69,10 +73,17 @@ function validateManagedUser_(input){
   if(stationAccess!=='Both'&&defaultStation!==stationAccess)throw new Error('Default station must match station access.');
   return{email,name,role,stationAccess,defaultStation};
 }
+function invitationManualAttachments_(){
+  return INVITATION_MANUALS.map(manual=>{
+    try{return DriveApp.getFileById(manual.id).getBlob().setName(manual.name)}
+    catch(e){throw new Error('Could not attach invitation manual: '+manual.name+'. Verify that the Apps Script owner still has access to the file.')}
+  });
+}
 function createUserInvitation(token,input){
   const a=requireAdmin_(token),ss=db_();ensureAdminSheets_(ss);
   const v=validateManagedUser_(input),users=ss.getSheetByName(APP.SHEETS.users),existing=user_(v.email);
   if(existing&&yes_(existing.Active))throw new Error('That email already has an active account.');
+  const attachments=invitationManualAttachments_();
   const raw=Utilities.getUuid()+Utilities.getUuid(),now=new Date(),expires=new Date(Date.now()+72*60*60*1000),invitationId=Utilities.getUuid();
   append_(ss.getSheetByName('USER_INVITATIONS'),{InvitationID:invitationId,Email:v.email,Name:v.name,Role:v.role,DefaultStation:v.defaultStation,StationAccess:v.stationAccess,TokenHash:hash_(raw),Status:'Pending',CreatedAt:now,CreatedBy:a.s.email,ExpiresAt:expires});
   const record={Email:v.email,Name:v.name,Role:v.role,DefaultStation:v.defaultStation,StationAccess:v.stationAccess,Active:false,PasswordHash:'',Salt:'',MustChange:false,InvitedAt:now,InvitedBy:a.s.email,UpdatedAt:now};
@@ -80,8 +91,8 @@ function createUserInvitation(token,input){
   const url=ScriptApp.getService().getUrl();
   if(!url)throw new Error('Deploy the project as a Web App before sending invitations.');
   const link=url+'?invite='+encodeURIComponent(raw),subject='Invitation to AAXI Closing';
-  const html='<div style="font-family:Arial,sans-serif;color:#18303f;max-width:620px"><h2 style="color:#173f5f">AAXI Closing invitation</h2><p>Hello <b>'+html_(v.name)+'</b>,</p><p>You were invited as <b>'+html_(v.role)+'</b> with access to <b>'+html_(v.stationAccess)+'</b>.</p><p><a href="'+html_(link)+'" style="display:inline-block;background:#1f9aaa;color:#fff;text-decoration:none;padding:14px 20px;border-radius:9px;font-weight:bold">ACCEPT INVITATION</a></p><p style="font-size:12px;color:#687b86">This private link expires in 72 hours and can be used once.</p></div>';
-  MailApp.sendEmail({to:v.email,subject,body:'Accept your AAXI Closing invitation: '+link,htmlBody:html,name:'AAXI Closing'});
+  const html='<div style="font-family:Arial,sans-serif;color:#18303f;max-width:620px"><h2 style="color:#173f5f">AAXI Closing invitation</h2><p>Hello <b>'+html_(v.name)+'</b>,</p><p>You were invited as <b>'+html_(v.role)+'</b> with access to <b>'+html_(v.stationAccess)+'</b>.</p><p><a href="'+html_(link)+'" style="display:inline-block;background:#1f9aaa;color:#fff;text-decoration:none;padding:14px 20px;border-radius:9px;font-weight:bold">ACCEPT INVITATION</a></p><p>The AAXI Closing Lead User Manuals in English and Spanish are attached to this email.</p><p style="font-size:12px;color:#687b86">This private link expires in 72 hours and can be used once.</p></div>';
+  MailApp.sendEmail({to:v.email,subject,body:'Accept your AAXI Closing invitation: '+link+'\n\nThe AAXI Closing Lead User Manuals in English and Spanish are attached.',htmlBody:html,attachments,name:'AAXI Closing'});
   audit_(a.s.email,'INVITE_USER','USER',v.email,v.role+' · '+v.stationAccess);
   return{ok:true,message:'Invitation sent to '+v.email+'.'};
 }
