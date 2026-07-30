@@ -155,21 +155,30 @@ function resetPasswordWithCode(email,code,newPassword){
     return{ok:true,message:'Password changed. Sign in with your new password.'};
   });
 }
+function dedupeRescueDrivers_(sh){
+  const data=sh.getDataRange().getValues(),headers=data[0].map(String),idCol=headers.indexOf('DriverID'),seen=new Set(),remove=[];
+  for(let r=data.length-1;r>=1;r--){
+    const id=String(data[r][idCol]||'').trim().toUpperCase();
+    if(!id||seen.has(id))remove.push(r+1);else seen.add(id);
+  }
+  remove.forEach(row=>sh.deleteRow(row));
+  return remove.length;
+}
 function importDriversFile(token,station,file){
   const a=requireAdmin_(token);station=String(station||'').toUpperCase();
   if(!APP.WORK_STATIONS.includes(station))throw new Error('Select DJX3 or DJX4.');
   const table=parseUploadTable_(file),required=['Name and ID','TransporterID','Status'];assertColumns_(table.headers,required,'driver');
   const col=indexColumns_(table.headers),seen=new Set(),items=[];
   table.rows.forEach((row,index)=>{
-    const id=cell_(row,col,'TransporterID'),name=cell_(row,col,'Name and ID'),status=cell_(row,col,'Status').toUpperCase(),email=cell_(row,col,'Email');
+    const id=cell_(row,col,'TransporterID').toUpperCase(),name=cell_(row,col,'Name and ID').replace(/\s+/g,' ').trim(),status=cell_(row,col,'Status').toUpperCase(),email=cell_(row,col,'Email');
     if(!id&&!name)return;if(!id||!name)throw new Error('Driver file row '+(index+2)+' is missing Name and ID or TransporterID.');
     if(seen.has(id))throw new Error('Driver file contains duplicate TransporterID: '+id);
     seen.add(id);items.push({DriverID:id,Driver:name,Station:station,Email:email,Active:status==='ACTIVE',UpdatedAt:new Date()});
   });
   if(!items.length)throw new Error('No drivers were found in the uploaded file.');
   return lock_(()=>{
-    const ss=db_();ensureAdminSheets_(ss);const sh=ss.getSheetByName(APP.SHEETS.rescueDrivers),existing=rows_(sh),byId=new Map(existing.map(x=>[String(x.DriverID),x]));
-    existing.filter(x=>String(x.Station).toUpperCase()===station&&!seen.has(String(x.DriverID))).forEach(x=>update_(sh,'DriverID',x.DriverID,{Active:false,UpdatedAt:new Date()}));
+    const ss=db_();ensureAdminSheets_(ss);const sh=ss.getSheetByName(APP.SHEETS.rescueDrivers);dedupeRescueDrivers_(sh);const existing=rows_(sh),byId=new Map(existing.map(x=>[String(x.DriverID).trim().toUpperCase(),x]));
+    existing.filter(x=>String(x.Station).toUpperCase()===station&&!seen.has(String(x.DriverID).trim().toUpperCase())).forEach(x=>update_(sh,'DriverID',x.DriverID,{Active:false,UpdatedAt:new Date()}));
     items.forEach(x=>{const old=byId.get(x.DriverID);if(old)update_(sh,'DriverID',old.DriverID,x);else append_(sh,x)});
     const active=items.filter(x=>x.Active).length;audit_(a.s.email,'IMPORT_DRIVERS','DRIVER',station,items.length+' rows · '+active+' active');
     saveImportUpdate_('drivers',station,a.u,a.s.email);
