@@ -1,7 +1,7 @@
 const APP={
   SHEETS:{config:'CONFIG',users:'USERS',vans:'VANS',spots:'SPOTS',inspections:'INSPECTIONS',photos:'PHOTOS',damages:'DAMAGES',audit:'AUDIT_LOG',rescueDrivers:'RESCUE_DRIVERS',dailyRescueDrivers:'DAILY_RESCUE_DRIVERS',rescues:'RESCUES',closingData:'DAILY_CLOSING',closingNotes:'CLOSING_NOTES',inspectionSkips:'INSPECTION_SKIP_REQUESTS'},
   STATIONS:['DJX3','DJX4','SHOP'],WORK_STATIONS:['DJX3','DJX4'],STATUSES:['Operational','Downed','Grounded'],
-  PARTS:['Front','Rear','Driver Side','Passenger Side','Cargo Interior','Cabin Interior'],
+  PARTS:['Front','Driver Side','Rear','Passenger Side','Cargo Interior','Cabin Interior'],
   DEFECTS:['Front','Rear','Driver Side','Passenger Side','Cargo Interior','Cabin Interior','Tires','Headlights','Brake Lights','Turn Signals','A/C','Mirrors','Windshield','Doors','Brakes','Battery','Engine / Warning Lights','Horn','Wipers','Seat Belts','Camera / Sensors','Other'],
   DAMAGE:['No Damage','Existing Damage','New Damage']
 };
