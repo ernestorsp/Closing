@@ -1,12 +1,12 @@
 const ADMIN_ROLES=['Admin','Lead'];
 const STATION_SCOPES=['DJX3','DJX4','Both'];
 const INVITATION_MANUALS=[
-  {id:'1-mNpblkYym6Woc9E1tq7ua0pYwcXHBTD',name:'Closing_APP_Lead_User_Manual_EN.pdf'},
-  {id:'17hVTB1UdV9t8EqWlRN6SrkVVSbBryK0Y',name:'Manual_APP_Closing_Lead.pdf'}
+  {id:'1XQ2opi1TcHDPCAji9fzQthnE3tJjrprQ',name:'Closing_User_Manual_Lead_EN.pdf'},
+  {id:'1JKpN-X7rx64ST5jzLbT0dPIpNp27qdYJ',name:'Manual_de_uso_Closing_Lead_ES.pdf'}
 ];
 
 function ensureAdminSheets_(ss){
-  ensureSheet_(ss,APP.SHEETS.users,['Email','Name','Role','DefaultStation','StationAccess','Active','PasswordHash','Salt','MustChange','InvitedAt','InvitedBy','LastLoginAt','UpdatedAt','PreferredLanguage']);
+  ensureSheet_(ss,APP.SHEETS.users,['Email','Name','Role','DefaultStation','StationAccess','Active','PasswordHash','Salt','MustChange','InvitedAt','InvitedBy','LastLoginAt','UpdatedAt']);
   ensureSheet_(ss,APP.SHEETS.vans,['VanID','VanNumber','VanType','HomeStation','CurrentStation','CurrentSpot','CurrentStatus','Active','LastInspectionAt','LastInspectionID','UpdatedAt']);
   ensureSheet_(ss,APP.SHEETS.rescueDrivers,['DriverID','Driver','Station','Email','Active','UpdatedAt']);
   ensureSheet_(ss,'USER_INVITATIONS',['InvitationID','Email','Name','Role','DefaultStation','StationAccess','TokenHash','Status','CreatedAt','CreatedBy','ExpiresAt','AcceptedAt']);
@@ -24,13 +24,7 @@ function allowedStations_(u){
   return APP.WORK_STATIONS.includes(value)?[value]:APP.WORK_STATIONS.slice();
 }
 function publicUser_(u){
-  return{email:norm_(u.Email),name:String(u.Name||''),role:managedRole_(u.Role),station:workingStation_(u),stationAccess:String(u.StationAccess||'Both'),allowedStations:allowedStations_(u),isAdmin:isAdmin_(u),language:preferredLanguage_(u)};
-}
-function preferredLanguage_(u){return String(u&&u.PreferredLanguage||'').toLowerCase()==='es'?'es':'en'}
-function setUserLanguage(token,language){
-  const s=auth_(token),ss=db_(),value=String(language||'').toLowerCase()==='es'?'es':'en';ensureAdminSheets_(ss);const u=user_(s.email);
-  if(!u||!update_(ss.getSheetByName(APP.SHEETS.users),'Email',u.Email,{PreferredLanguage:value,UpdatedAt:new Date()}))throw new Error('User not found.');
-  return{ok:true,language:value};
+  return{email:norm_(u.Email),name:String(u.Name||''),role:managedRole_(u.Role),station:workingStation_(u),stationAccess:String(u.StationAccess||'Both'),allowedStations:allowedStations_(u),isAdmin:isAdmin_(u)};
 }
 function managedRole_(role){return String(role||'Lead')==='User'?'Lead':String(role||'Lead')}
 function revokeUserSessions_(email){
@@ -275,7 +269,7 @@ function vanTypeFromSource_(service,name){
 
 
 function ensureAvatarSheets_(ss){
-  ensureSheet_(ss,APP.SHEETS.avatarMessages,['MessageID','MessageText','Station','RecipientEmail','RecipientName','Active','CreatedAt','CreatedByEmail','CreatedByName']);
+  ensureSheet_(ss,APP.SHEETS.avatarMessages,['MessageID','MessageText','Station','Active','CreatedAt','CreatedByEmail','CreatedByName']);
   ensureSheet_(ss,APP.SHEETS.avatarAcks,['AckID','MessageID','UserEmail','UserName','AcknowledgedAt']);
 }
 function avatarTextForLanguage_(text,language){
@@ -286,44 +280,43 @@ function avatarPendingMessages_(ss,email,station,language){
   ensureAvatarSheets_(ss);
   const acknowledged=new Set(rowsTail_(ss.getSheetByName(APP.SHEETS.avatarAcks),2000).map(x=>String(x.MessageID)));
   return rowsTail_(ss.getSheetByName(APP.SHEETS.avatarMessages),500)
-    .filter(x=>{const recipient=norm_(x.RecipientEmail);return yes_(x.Active)&&!acknowledged.has(String(x.MessageID))&&(recipient?recipient===norm_(email):['ALL',String(station||'').toUpperCase()].includes(String(x.Station||'ALL').toUpperCase()))})
+    .filter(x=>yes_(x.Active)&&!acknowledged.has(String(x.MessageID))&&['ALL',String(station||'').toUpperCase()].includes(String(x.Station||'ALL').toUpperCase()))
     .sort((x,y)=>String(x.CreatedAt||'').localeCompare(String(y.CreatedAt||'')))
-    .map(x=>({messageId:String(x.MessageID),text:avatarTextForLanguage_(x.MessageText,language),station:String(x.RecipientName||x.Station||'ALL'),createdAt:x.CreatedAt||'',createdByName:String(x.CreatedByName||'Admin'),requiresAck:true}));
+    .map(x=>({messageId:String(x.MessageID),text:avatarTextForLanguage_(x.MessageText,language),station:String(x.Station||'ALL'),createdAt:x.CreatedAt||'',createdByName:String(x.CreatedByName||'Admin'),requiresAck:true}));
 }
 function getAvatarMessages(token,language){
-  const s=auth_(token),ss=db_(),u=user_(s.email)||s.user,station=workingStation_(u),preferred=preferredLanguage_(u);
-  return{messages:avatarPendingMessages_(ss,s.email,station,preferred)};
+  const s=auth_(token),ss=db_(),u=s.user||user_(s.email),station=workingStation_(u);
+  return{messages:avatarPendingMessages_(ss,s.email,station,language)};
 }
 function acknowledgeAvatarMessage(token,messageId,language){
-  const s=auth_(token),ss=db_(),u=user_(s.email)||s.user,id=String(messageId||'').trim(),preferred=preferredLanguage_(u);
+  const s=auth_(token),ss=db_(),u=s.user||user_(s.email),id=String(messageId||'').trim();
   if(!id)throw new Error('Message not found.');
   return lock_(()=>{
     ensureAvatarSheets_(ss);
     const station=workingStation_(u),message=rowsTail_(ss.getSheetByName(APP.SHEETS.avatarMessages),500).find(x=>String(x.MessageID)===id),prior=rowsTail_(ss.getSheetByName(APP.SHEETS.avatarAcks),2000).some(x=>String(x.MessageID)===id);
     if(!message)throw new Error('Message not found.');
-    if(prior||!yes_(message.Active))return{ok:true,claimed:false,messages:avatarPendingMessages_(ss,s.email,station,preferred)};
-    const recipient=norm_(message.RecipientEmail);if(recipient?recipient!==s.email:!['ALL',String(station).toUpperCase()].includes(String(message.Station||'ALL').toUpperCase()))throw new Error('This message is not assigned to you.');
+    if(prior||!yes_(message.Active))return{ok:true,claimed:false,messages:avatarPendingMessages_(ss,s.email,station,language)};
+    if(!['ALL',String(station).toUpperCase()].includes(String(message.Station||'ALL').toUpperCase()))throw new Error('This message is not assigned to your station.');
     append_(ss.getSheetByName(APP.SHEETS.avatarAcks),{AckID:Utilities.getUuid(),MessageID:id,UserEmail:s.email,UserName:String(u.Name||''),AcknowledgedAt:new Date()});
     update_(ss.getSheetByName(APP.SHEETS.avatarMessages),'MessageID',id,{Active:false});
     audit_(s.email,'ACK_AVATAR_MESSAGE','AVATAR_MESSAGE',id,'Read and accepted');
-    return{ok:true,claimed:true,messages:avatarPendingMessages_(ss,s.email,station,preferred)};
+    return{ok:true,claimed:true,messages:avatarPendingMessages_(ss,s.email,station,language)};
   });
 }
 function sendAvatarMessage(token,input){
   const a=requireAdmin_(token),ss=db_();input=input||{};
-  const enteredText=String(input.message||'').trim(),text=String(input.language||'').toLowerCase()==='es'?(()=>{try{return LanguageApp.translate(enteredText,'es','en')}catch(e){return enteredText}})():enteredText,audience=String(input.audience||input.station||'station:ALL');let station='ALL',recipientEmail='',recipientName='';
+  const enteredText=String(input.message||'').trim(),text=String(input.language||'').toLowerCase()==='es'?(()=>{try{return LanguageApp.translate(enteredText,'es','en')}catch(e){return enteredText}})():enteredText,station=String(input.station||'ALL').toUpperCase();
   if(!text)throw new Error('Write a message for the team.');
   if(text.length>500)throw new Error('The message must be 500 characters or less.');
-  if(audience.toLowerCase().indexOf('user:')===0){recipientEmail=norm_(audience.slice(5));const recipient=rows_(ss.getSheetByName(APP.SHEETS.users)).find(x=>yes_(x.Active)&&norm_(x.Email)===recipientEmail);if(!recipient)throw new Error('Select an active user.');station='USER';recipientName=String(recipient.Name||recipient.Email)}else{station=audience.replace(/^station:/i,'').toUpperCase();if(!['ALL'].concat(APP.WORK_STATIONS).includes(station))throw new Error('Select All, DJX3, DJX4 or a user.')}
+  if(!['ALL'].concat(APP.WORK_STATIONS).includes(station))throw new Error('Select All, DJX3 or DJX4.');
   ensureAvatarSheets_(ss);
   const id=Utilities.getUuid();
-  append_(ss.getSheetByName(APP.SHEETS.avatarMessages),{MessageID:id,MessageText:text,Station:station,RecipientEmail:recipientEmail,RecipientName:recipientName,Active:true,CreatedAt:new Date(),CreatedByEmail:a.s.email,CreatedByName:String(a.u.Name||a.s.email)});
-  audit_(a.s.email,'SEND_AVATAR_MESSAGE','AVATAR_MESSAGE',id,(recipientName||station)+' · '+text);
+  append_(ss.getSheetByName(APP.SHEETS.avatarMessages),{MessageID:id,MessageText:text,Station:station,Active:true,CreatedAt:new Date(),CreatedByEmail:a.s.email,CreatedByName:String(a.u.Name||a.s.email)});
+  audit_(a.s.email,'SEND_AVATAR_MESSAGE','AVATAR_MESSAGE',id,station+' · '+text);
   return{ok:true,message:'Message sent through Closing Buddy.',data:getAvatarAdminData(token,input.language)};
 }
 function getAvatarAdminData(token,language){
   requireAdmin_(token);const ss=db_();ensureAvatarSheets_(ss);
   const counts={};rowsTail_(ss.getSheetByName(APP.SHEETS.avatarAcks),3000).forEach(x=>counts[String(x.MessageID)]=(counts[String(x.MessageID)]||0)+1);
-  const users=rows_(ss.getSheetByName(APP.SHEETS.users)).filter(x=>yes_(x.Active)&&norm_(x.Email)).map(x=>({email:norm_(x.Email),name:String(x.Name||x.Email),station:String(x.DefaultStation||'')})).sort((a,b)=>a.name.localeCompare(b.name));
-  return{users,messages:rowsTail_(ss.getSheetByName(APP.SHEETS.avatarMessages),200).sort((x,y)=>String(y.CreatedAt||'').localeCompare(String(x.CreatedAt||''))).map(x=>({messageId:String(x.MessageID),text:avatarTextForLanguage_(x.MessageText,language),station:String(x.Station||'ALL'),audience:String(x.RecipientName||x.Station||'ALL'),recipientEmail:norm_(x.RecipientEmail),active:yes_(x.Active),createdAt:x.CreatedAt||'',createdByName:String(x.CreatedByName||x.CreatedByEmail||'Admin'),ackCount:counts[String(x.MessageID)]||0}))};
+  return{messages:rowsTail_(ss.getSheetByName(APP.SHEETS.avatarMessages),200).sort((x,y)=>String(y.CreatedAt||'').localeCompare(String(x.CreatedAt||''))).map(x=>({messageId:String(x.MessageID),text:String(x.MessageText||''),station:String(x.Station||'ALL'),active:yes_(x.Active),createdAt:x.CreatedAt||'',createdByName:String(x.CreatedByName||x.CreatedByEmail||'Admin'),ackCount:counts[String(x.MessageID)]||0}))};
 }
