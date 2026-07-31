@@ -195,4 +195,15 @@ input::placeholder,textarea::placeholder{color:#93a2aa}
 @keyframes mascotSmokeVanish{0%{opacity:1;transform:none;filter:none}45%{opacity:.45;transform:scale(.94)}100%{opacity:0;transform:scale(.7) translateY(-8px);filter:blur(5px)}}
 @media(prefers-reduced-motion:reduce){.homeMascot.mascotSmokeIn,.homeMascot.mascotSmokeOut,.mascotSmokeCloud i{animation-duration:.01ms!important}.mascotSmokeCloud{display:none}}
 
+
+/* Blue Amazon Closing Buddy image */
+.homeMascot{grid-template-columns:180px minmax(0,1fr)}
+.mascotCharacter{display:grid;place-items:center;width:180px;height:180px;cursor:default;transform:none!important}
+.mascotImage{display:block;width:180px;height:180px;object-fit:contain;filter:drop-shadow(0 8px 8px #173f5f30);animation:mascotImageFloat 3s ease-in-out infinite}
+.homeMascot.mascotTalking .mascotImage{animation:mascotImageTalk .55s ease-in-out 2}
+@keyframes mascotImageFloat{0%,100%{transform:translateY(0) rotate(-1deg)}50%{transform:translateY(-4px) rotate(1deg)}}
+@keyframes mascotImageTalk{0%,100%{transform:scale(1) rotate(0)}45%{transform:scale(1.06) rotate(-2deg)}70%{transform:scale(.98) rotate(2deg)}}
+@media(max-width:720px){.homeMascot{grid-template-columns:122px minmax(0,1fr)}.mascotCharacter,.mascotImage{width:122px;height:145px;transform:none!important}}
+@media(prefers-reduced-motion:reduce){.mascotImage{animation:none!important}}
+
 </style>
