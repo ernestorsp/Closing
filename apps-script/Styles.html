@@ -35,6 +35,11 @@ header .station select{border-color:#ffffff35;background:#ffffff12;color:#fff;fo
 header .station select option{color:var(--text);background:#fff}
 .headerSync,.ghost{border:1px solid #ffffff30;background:#ffffff0f;box-shadow:none}
 .headerSync:hover,.ghost:hover{background:#ffffff1c;border-color:#ffffff50}
+.languagePicker{display:flex!important;grid-auto-flow:column;gap:4px;min-width:0;margin-left:auto;padding:4px;border:1px solid #ffffff2d;border-radius:12px;background:#ffffff0d}
+.languagePicker button{display:flex;align-items:center;gap:4px;min-width:54px;padding:7px 9px;border:0;border-radius:8px;background:transparent;color:#dce8ed;font-size:17px;font-weight:900}
+.languagePicker button span{font-size:10px;letter-spacing:.04em}
+.languagePicker button.active{background:#fff;color:var(--navy);box-shadow:0 3px 10px #07172430}
+header .languagePicker+.station{margin-left:0}
 nav{top:72px;padding:0 12px;border-bottom:1px solid var(--line);background:#ffffffee;box-shadow:0 4px 16px #173f5f0b;backdrop-filter:blur(12px)}
 nav button{position:relative;padding:16px 18px;border-bottom:0;color:#657782;font-size:13px;letter-spacing:.15px}
 nav button::after{content:"";position:absolute;right:18px;bottom:7px;left:18px;height:3px;border-radius:999px;background:transparent}
@@ -150,7 +155,7 @@ input::placeholder,textarea::placeholder{color:#93a2aa}
 @keyframes mascotBlink{0%,45%,49%,100%{transform:scaleY(1)}47%{transform:scaleY(.12)}}
 @media(max-width:720px){.homeMascot{grid-template-columns:112px minmax(0,1fr);gap:10px;padding:15px 40px 15px 8px}.mascotCharacter{width:110px;transform:scale(.82)}.mascotCharacter:hover{transform:scale(.82)}.mascotDialog{padding:14px}.mascotDialog p{font-size:14px}.mascotDialog::before{left:-8px}.homeMascot.minimized{width:122px}.homeMascot.minimized .mascotCharacter{transform:scale(.82)}}
 @media(prefers-reduced-motion:reduce){.mascotHead,.mascotEye,.mascotWaveArm{animation:none}}
-@media(max-width:720px){header{flex-wrap:wrap}header>div{margin-right:auto;min-width:0}.headerSync{min-width:44px;padding:9px}.syncLabel{display:none}.station{order:3;margin:0;width:100%;justify-content:space-between}nav{top:115px}.stats{grid-template-columns:1fr 1fr}.closingChecklist,.grid2,.photoGrid,.historyPhotos,.vanCountGrid,.closingFields,.adminGrid,.permissionSummary,.adminUserFields{grid-template-columns:1fr}.sectionTitle{align-items:stretch;flex-direction:column}.sectionTitle input{max-width:none}.card{align-items:flex-start}main{padding:14px}.photoPreview{height:210px}.rescueFields{grid-template-columns:1fr 1fr}.rescueFields label:first-child,.rescueNotes{grid-column:1/-1}.closingFields .wide{grid-column:auto}.notePhotoList{grid-template-columns:repeat(2,1fr)}.rescueFinal,.inspectionSkipPanel,.adminUserActions{align-items:stretch;flex-direction:column}.rescueFinal button,.inspectionSkipPanel button,.adminUserActions button{width:100%}}
+@media(max-width:720px){header{flex-wrap:wrap}header>div{margin-right:auto;min-width:0}.languagePicker{margin-right:0!important;margin-left:0}.languagePicker button{min-width:46px;padding:7px}.headerSync{min-width:44px;padding:9px}.syncLabel{display:none}.station{order:3;margin:0;width:100%;justify-content:space-between}nav{top:115px}.stats{grid-template-columns:1fr 1fr}.closingChecklist,.grid2,.photoGrid,.historyPhotos,.vanCountGrid,.closingFields,.adminGrid,.permissionSummary,.adminUserFields{grid-template-columns:1fr}.sectionTitle{align-items:stretch;flex-direction:column}.sectionTitle input{max-width:none}.card{align-items:flex-start}main{padding:14px}.photoPreview{height:210px}.rescueFields{grid-template-columns:1fr 1fr}.rescueFields label:first-child,.rescueNotes{grid-column:1/-1}.closingFields .wide{grid-column:auto}.notePhotoList{grid-template-columns:repeat(2,1fr)}.rescueFinal,.inspectionSkipPanel,.adminUserActions{align-items:stretch;flex-direction:column}.rescueFinal button,.inspectionSkipPanel button,.adminUserActions button{width:100%}}
 
 /* Closing Buddy notifications and Admin message center */
 .homeMascot[hidden]{display:none!important}
