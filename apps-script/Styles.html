@@ -143,6 +143,8 @@ input::placeholder,textarea::placeholder{color:#93a2aa}
 .homeMascot.minimized .mascotDialog{display:none}
 .homeMascot.minimized .mascotCharacter{display:block;margin:auto}
 .homeMascot.minimized .mascotMinimize::after{content:"+";font-size:16px}.homeMascot.minimized .mascotMinimize{font-size:0}
+.homeMascot.mascotTalking .mascotMouth{animation:mascotTalk .5s ease-in-out 2}
+@keyframes mascotTalk{0%,100%{height:17px}50%{height:8px;transform:translateY(5px)}}
 @keyframes mascotWave{0%,42%,100%{transform:rotate(12deg)}10%{transform:rotate(-34deg)}20%{transform:rotate(22deg)}30%{transform:rotate(-28deg)}}
 @keyframes mascotBob{0%,100%{transform:translateY(0) rotate(-1deg)}50%{transform:translateY(-3px) rotate(1deg)}}
 @keyframes mascotBlink{0%,45%,49%,100%{transform:scaleY(1)}47%{transform:scaleY(.12)}}
