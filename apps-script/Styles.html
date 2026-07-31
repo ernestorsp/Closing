@@ -183,4 +183,16 @@ input::placeholder,textarea::placeholder{color:#93a2aa}
 @media(max-width:820px){.avatarAdminGrid{grid-template-columns:1fr}.avatarComposer{position:static}}
 @media(max-width:720px){.homeMascot{padding-right:10px}.mascotActions button{width:100%}.avatarComposerFooter{align-items:stretch;flex-direction:column}.avatarComposerFooter button{width:100%}}
 
+
+/* Closing Buddy smoke entrance and exit */
+.homeMascot.mascotSmokeIn{animation:mascotSmokeReveal .58s cubic-bezier(.2,.8,.25,1) both}
+.homeMascot.mascotSmokeOut{pointer-events:none;animation:mascotSmokeVanish .56s ease-in both}
+.mascotSmokeCloud{position:absolute;z-index:20;inset:-34px;display:block;pointer-events:none;overflow:visible}
+.mascotSmokeCloud i{position:absolute;left:50%;top:52%;width:48px;height:48px;border-radius:50%;background:radial-gradient(circle at 34% 30%,#fff 0 18%,#e8eff2 44%,#aebdc4 78%,#82939b 100%);box-shadow:0 4px 12px #173f5f30;opacity:0;animation:mascotSmokePuff .82s ease-out both;animation-delay:calc(var(--puff)*18ms)}
+.mascotSmokeCloud i:nth-child(1){--x:-145px;--y:-72px;--s:1.05}.mascotSmokeCloud i:nth-child(2){--x:-105px;--y:42px;--s:.8}.mascotSmokeCloud i:nth-child(3){--x:-55px;--y:-92px;--s:1.2}.mascotSmokeCloud i:nth-child(4){--x:-18px;--y:78px;--s:.75}.mascotSmokeCloud i:nth-child(5){--x:34px;--y:-82px;--s:1.08}.mascotSmokeCloud i:nth-child(6){--x:78px;--y:65px;--s:.9}.mascotSmokeCloud i:nth-child(7){--x:130px;--y:-48px;--s:1.18}.mascotSmokeCloud i:nth-child(8){--x:155px;--y:38px;--s:.72}.mascotSmokeCloud i:nth-child(9){--x:-155px;--y:6px;--s:.86}.mascotSmokeCloud i:nth-child(10){--x:15px;--y:8px;--s:1.35}.mascotSmokeCloud i:nth-child(11){--x:112px;--y:4px;--s:.95}
+@keyframes mascotSmokePuff{0%{opacity:0;transform:translate(-50%,-50%) scale(.15)}24%{opacity:.92}100%{opacity:0;transform:translate(calc(-50% + var(--x)),calc(-50% + var(--y))) scale(var(--s))}}
+@keyframes mascotSmokeReveal{0%{opacity:0;transform:scale(.72) translateY(12px);filter:blur(5px)}48%{opacity:.35}100%{opacity:1;transform:none;filter:none}}
+@keyframes mascotSmokeVanish{0%{opacity:1;transform:none;filter:none}45%{opacity:.45;transform:scale(.94)}100%{opacity:0;transform:scale(.7) translateY(-8px);filter:blur(5px)}}
+@media(prefers-reduced-motion:reduce){.homeMascot.mascotSmokeIn,.homeMascot.mascotSmokeOut,.mascotSmokeCloud i{animation-duration:.01ms!important}.mascotSmokeCloud{display:none}}
+
 </style>
