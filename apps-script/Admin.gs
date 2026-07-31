@@ -266,3 +266,52 @@ function vanTypeFromSource_(service,name){
   if(value.includes('CARGO'))return'CDV';
   return'Van';
 }
+
+
+function ensureAvatarSheets_(ss){
+  ensureSheet_(ss,APP.SHEETS.avatarMessages,['MessageID','MessageText','Station','Active','CreatedAt','CreatedByEmail','CreatedByName']);
+  ensureSheet_(ss,APP.SHEETS.avatarAcks,['AckID','MessageID','UserEmail','UserName','AcknowledgedAt']);
+}
+function avatarPendingMessages_(ss,email,station){
+  ensureAvatarSheets_(ss);
+  const acknowledged=new Set(rowsTail_(ss.getSheetByName(APP.SHEETS.avatarAcks),2000).filter(x=>norm_(x.UserEmail)===norm_(email)).map(x=>String(x.MessageID)));
+  return rowsTail_(ss.getSheetByName(APP.SHEETS.avatarMessages),500)
+    .filter(x=>yes_(x.Active)&&!acknowledged.has(String(x.MessageID))&&['ALL',String(station||'').toUpperCase()].includes(String(x.Station||'ALL').toUpperCase()))
+    .sort((x,y)=>String(x.CreatedAt||'').localeCompare(String(y.CreatedAt||'')))
+    .map(x=>({messageId:String(x.MessageID),text:String(x.MessageText||''),station:String(x.Station||'ALL'),createdAt:x.CreatedAt||'',createdByName:String(x.CreatedByName||'Admin'),requiresAck:true}));
+}
+function getAvatarMessages(token){
+  const s=auth_(token),ss=db_(),u=s.user||user_(s.email),station=workingStation_(u);
+  return{messages:avatarPendingMessages_(ss,s.email,station)};
+}
+function acknowledgeAvatarMessage(token,messageId){
+  const s=auth_(token),ss=db_(),u=s.user||user_(s.email),id=String(messageId||'').trim();
+  if(!id)throw new Error('Message not found.');
+  return lock_(()=>{
+    ensureAvatarSheets_(ss);
+    const station=workingStation_(u),message=rowsTail_(ss.getSheetByName(APP.SHEETS.avatarMessages),500).find(x=>String(x.MessageID)===id&&yes_(x.Active));
+    if(!message)throw new Error('This message is no longer active.');
+    if(!['ALL',String(station).toUpperCase()].includes(String(message.Station||'ALL').toUpperCase()))throw new Error('This message is not assigned to your station.');
+    const prior=rowsTail_(ss.getSheetByName(APP.SHEETS.avatarAcks),2000).some(x=>String(x.MessageID)===id&&norm_(x.UserEmail)===s.email);
+    if(!prior)append_(ss.getSheetByName(APP.SHEETS.avatarAcks),{AckID:Utilities.getUuid(),MessageID:id,UserEmail:s.email,UserName:String(u.Name||''),AcknowledgedAt:new Date()});
+    audit_(s.email,'ACK_AVATAR_MESSAGE','AVATAR_MESSAGE',id,'Read and accepted');
+    return{ok:true,messages:avatarPendingMessages_(ss,s.email,station)};
+  });
+}
+function sendAvatarMessage(token,input){
+  const a=requireAdmin_(token),ss=db_();input=input||{};
+  const text=String(input.message||'').trim(),station=String(input.station||'ALL').toUpperCase();
+  if(!text)throw new Error('Write a message for the team.');
+  if(text.length>500)throw new Error('The message must be 500 characters or less.');
+  if(!['ALL'].concat(APP.WORK_STATIONS).includes(station))throw new Error('Select All, DJX3 or DJX4.');
+  ensureAvatarSheets_(ss);
+  const id=Utilities.getUuid();
+  append_(ss.getSheetByName(APP.SHEETS.avatarMessages),{MessageID:id,MessageText:text,Station:station,Active:true,CreatedAt:new Date(),CreatedByEmail:a.s.email,CreatedByName:String(a.u.Name||a.s.email)});
+  audit_(a.s.email,'SEND_AVATAR_MESSAGE','AVATAR_MESSAGE',id,station+' · '+text);
+  return{ok:true,message:'Message sent through Closing Buddy.',data:getAvatarAdminData(token)};
+}
+function getAvatarAdminData(token){
+  requireAdmin_(token);const ss=db_();ensureAvatarSheets_(ss);
+  const counts={};rowsTail_(ss.getSheetByName(APP.SHEETS.avatarAcks),3000).forEach(x=>counts[String(x.MessageID)]=(counts[String(x.MessageID)]||0)+1);
+  return{messages:rowsTail_(ss.getSheetByName(APP.SHEETS.avatarMessages),200).sort((x,y)=>String(y.CreatedAt||'').localeCompare(String(x.CreatedAt||''))).map(x=>({messageId:String(x.MessageID),text:String(x.MessageText||''),station:String(x.Station||'ALL'),active:yes_(x.Active),createdAt:x.CreatedAt||'',createdByName:String(x.CreatedByName||x.CreatedByEmail||'Admin'),ackCount:counts[String(x.MessageID)]||0}))};
+}
