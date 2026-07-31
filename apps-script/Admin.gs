@@ -6,7 +6,7 @@ const INVITATION_MANUALS=[
 ];
 
 function ensureAdminSheets_(ss){
-  ensureSheet_(ss,APP.SHEETS.users,['Email','Name','Role','DefaultStation','StationAccess','Active','PasswordHash','Salt','MustChange','InvitedAt','InvitedBy','LastLoginAt','UpdatedAt']);
+  ensureSheet_(ss,APP.SHEETS.users,['Email','Name','Role','DefaultStation','StationAccess','PreferredLanguage','Active','PasswordHash','Salt','MustChange','InvitedAt','InvitedBy','LastLoginAt','UpdatedAt']);
   ensureSheet_(ss,APP.SHEETS.vans,['VanID','VanNumber','VanType','HomeStation','CurrentStation','CurrentSpot','CurrentStatus','Active','LastInspectionAt','LastInspectionID','UpdatedAt']);
   ensureSheet_(ss,APP.SHEETS.rescueDrivers,['DriverID','Driver','Station','Email','Active','UpdatedAt']);
   ensureSheet_(ss,'USER_INVITATIONS',['InvitationID','Email','Name','Role','DefaultStation','StationAccess','TokenHash','Status','CreatedAt','CreatedBy','ExpiresAt','AcceptedAt']);
@@ -24,7 +24,7 @@ function allowedStations_(u){
   return APP.WORK_STATIONS.includes(value)?[value]:APP.WORK_STATIONS.slice();
 }
 function publicUser_(u){
-  return{email:norm_(u.Email),name:String(u.Name||''),role:managedRole_(u.Role),station:workingStation_(u),stationAccess:String(u.StationAccess||'Both'),allowedStations:allowedStations_(u),isAdmin:isAdmin_(u)};
+  return{email:norm_(u.Email),name:String(u.Name||''),role:managedRole_(u.Role),station:workingStation_(u),stationAccess:String(u.StationAccess||'Both'),preferredLanguage:['en','es'].includes(String(u.PreferredLanguage||'').toLowerCase())?String(u.PreferredLanguage).toLowerCase():'',allowedStations:allowedStations_(u),isAdmin:isAdmin_(u)};
 }
 function managedRole_(role){return String(role||'Lead')==='User'?'Lead':String(role||'Lead')}
 function revokeUserSessions_(email){
