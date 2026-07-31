@@ -125,8 +125,9 @@ function finishInspection(token,input){
       const spotId=String(input.spotId||'');
       const sp=find_(ss,APP.SHEETS.spots,'SpotID',spotId);
       if(!sp||sp.Station!==station||!yes_(sp.Active))throw new Error('Select an available spot.');
-      const reserved=sp.ReservedByEmail&&norm_(sp.ReservedByEmail)!==norm_(s.email)&&new Date(sp.ReservationExpires||0).getTime()>Date.now();
-      if(reserved||completedSpotOwner_(ss,station,sp.Spot,i.VanID))throw new Error('That spot is already occupied. Select another spot and press Finish inspection again.');
+      const reserved=sp.ReservedByEmail&&norm_(sp.ReservedByEmail)!==norm_(s.email)&&new Date(sp.ReservationExpires||0).getTime()>Date.now(),owner=completedSpotOwner_(ss,station,sp.Spot,i.VanID);
+      if(owner){const occupyingVan=find_(ss,APP.SHEETS.vans,'VanID',owner.VanID)||owner,number=String(occupyingVan.VanNumber||occupyingVan.VanID||'unknown');throw new Error('Spot '+sp.Spot+' is occupied by van '+number+'. Select another spot and press Finish inspection again.')}
+      if(reserved)throw new Error('Spot '+sp.Spot+' is reserved by another inspection. Select another spot and press Finish inspection again.');
       spot=String(sp.Spot);
     }
     const status=atShop?'Grounded':transfer?(i.Status||i.PreviousStatus||'Operational'):String(input.status||'');
