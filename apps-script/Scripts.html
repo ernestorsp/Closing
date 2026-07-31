@@ -86,17 +86,32 @@ function mascotAutomaticMessages(){
  add('motivate-3','Keep going—the last part of closing always looks bigger before it gets done.');
  add('motivate-4','Professional, calm, complete. That’s the closing recipe. The giant head is optional.');
  add('motivate-5','Small checks prevent big surprises tomorrow. Future shift says thanks.');
+ add('motivate-6','Half an hour passed. Take a breath, check the list, and knock out the next item.');
+ add('motivate-7','Closing is a marathon with vans. Fortunately, none of them can outrun the checklist.');
+ add('motivate-8','A clean closing today is a calmer opening tomorrow. Keep stacking the wins.');
+ add('motivate-9','No need to rush—just don’t let the checklist start growing roots.');
+ add('motivate-10','One more task finished means one less task staring at you.');
+ add('spot-check-1','Spot check! Make sure every inspected van is parked where the app says it is.');
+ add('spot-check-2','Vans and spots should match. Musical chairs is not part of closing.');
+ add('damage-check','Any new damage today? A clear note and photo save tomorrow’s detective work.');
+ add('phones-check','Count the phones before they discover freedom and hide under a seat.');
+ add('keys-check','Quick equipment check: phones, batteries, keys—everybody home?');
+ add('team-1','The team is almost there. A little focus now buys everyone a smoother finish.');
+ add('team-2','Good closing work is mostly small details done before they become big details.');
+ add('clean-1','A clean van is tomorrow morning’s best first impression.');
+ add('routes-1','Routes for tomorrow deserve one last look. Future dispatch will appreciate it.');
+ add('final-review','Before sending Notes, give the checklist one calm final scan. Big head, small mistakes.');
  return messages;
 }
 function pickMascotAutomaticMessage(){
  const list=mascotAutomaticMessages(),available=list.filter(x=>!MASCOT_RECENT.includes(x.id)),pool=available.length?available:list,item=pool[Math.floor(Math.random()*pool.length)];
- MASCOT_RECENT.push(item.id);if(MASCOT_RECENT.length>6)MASCOT_RECENT.shift();return item;
+ MASCOT_RECENT.push(item.id);if(MASCOT_RECENT.length>10)MASCOT_RECENT.shift();return item;
 }
 function startMascotSystem(){
  if(!DATA.user||MASCOT_STARTED)return;MASCOT_STARTED=true;
  DATA.avatarMessages=Array.isArray(DATA.avatarMessages)?DATA.avatarMessages:[];
  setTimeout(()=>{if((DATA.avatarMessages||[]).length)showPendingAvatarMessage();else showMascotMessage({id:'welcome',text:'Hey '+String(DATA.user.name||'').split(' ')[0]+'! Closing Buddy is ready at '+DATA.user.station+'. I only pop up when I have something useful… or funny.',requiresAck:false,sender:'Closing Buddy',station:DATA.user.station})},900);
- MASCOT_TIMER=setInterval(()=>{if(document.visibilityState!=='hidden'&&!(DATA.avatarMessages||[]).length)showMascotMessage(pickMascotAutomaticMessage())},15*60*1000);
+ MASCOT_TIMER=setInterval(()=>{if(document.visibilityState!=='hidden'&&!(DATA.avatarMessages||[]).length)showMascotMessage(pickMascotAutomaticMessage())},30*60*1000);
  MASCOT_POLL_TIMER=setInterval(pollAvatarMessages,60*1000);
 }
 function showMascotMessage(item){
@@ -107,13 +122,20 @@ function showMascotMessage(item){
  document.getElementById('mascotSender').textContent=item.requiresAck?(item.sender||'Admin'):'Closing Buddy';
  document.getElementById('mascotAck').hidden=!item.requiresAck;
  document.getElementById('mascotDismiss').hidden=!!item.requiresAck;
- box.hidden=false;box.classList.remove('mascotTalking');void box.offsetWidth;box.classList.add('mascotTalking');
+ box.hidden=false;box.classList.remove('mascotTalking','mascotSmokeOut');box.classList.add('mascotSmokeIn');createMascotSmoke(box);void box.offsetWidth;box.classList.add('mascotTalking');setTimeout(()=>box.classList.remove('mascotSmokeIn'),700);
  if(!item.requiresAck)MASCOT_HIDE_TIMER=setTimeout(dismissMascot,22000);
 }
-function dismissMascot(){
- if(MASCOT_CURRENT&&MASCOT_CURRENT.requiresAck)return;
- clearTimeout(MASCOT_HIDE_TIMER);const box=document.getElementById('homeMascot');if(box)box.hidden=true;MASCOT_CURRENT=null;
+function createMascotSmoke(box){
+ if(!box)return;box.querySelectorAll('.mascotSmokeCloud').forEach(x=>x.remove());const cloud=document.createElement('span');cloud.className='mascotSmokeCloud';cloud.setAttribute('aria-hidden','true');
+ for(let i=0;i<11;i++){const puff=document.createElement('i');puff.style.setProperty('--puff',i);cloud.appendChild(puff)}box.appendChild(cloud);setTimeout(()=>cloud.remove(),900);
 }
+function hideMascotWithSmoke(force){
+ if(MASCOT_CURRENT&&MASCOT_CURRENT.requiresAck&&!force)return;
+ clearTimeout(MASCOT_HIDE_TIMER);const box=document.getElementById('homeMascot');if(!box)return;
+ createMascotSmoke(box);box.classList.remove('mascotSmokeIn');box.classList.add('mascotSmokeOut');MASCOT_CURRENT=null;
+ setTimeout(()=>{box.hidden=true;box.classList.remove('mascotSmokeOut')},560);
+}
+function dismissMascot(){hideMascotWithSmoke(false)}
 function showPendingAvatarMessage(){
  const item=(DATA.avatarMessages||[])[0];if(!item)return;
  showMascotMessage({id:item.messageId,messageId:item.messageId,text:item.text,station:item.station||DATA.user.station,sender:item.createdByName||'Admin',requiresAck:true});
@@ -124,7 +146,7 @@ function pollAvatarMessages(){
 }
 function acknowledgeMascotMessage(){
  if(!MASCOT_CURRENT||!MASCOT_CURRENT.requiresAck)return;const id=MASCOT_CURRENT.messageId,button=document.getElementById('mascotAck');button.disabled=true;
- google.script.run.withSuccessHandler(r=>{button.disabled=false;DATA.avatarMessages=r.messages||[];MASCOT_CURRENT=null;const box=document.getElementById('homeMascot');if(box)box.hidden=true;toast('Message marked as read.');if(DATA.avatarMessages.length)setTimeout(showPendingAvatarMessage,450)}).withFailureHandler(e=>{button.disabled=false;toast(e.message||String(e),true)}).acknowledgeAvatarMessage(TOKEN,id);
+ google.script.run.withSuccessHandler(r=>{button.disabled=false;DATA.avatarMessages=r.messages||[];hideMascotWithSmoke(true);toast('Message marked as read.');if(DATA.avatarMessages.length)setTimeout(showPendingAvatarMessage,700)}).withFailureHandler(e=>{button.disabled=false;toast(e.message||String(e),true)}).acknowledgeAvatarMessage(TOKEN,id);
 }
 function renderAccess(){document.querySelectorAll('[data-admin-only]').forEach(x=>x.hidden=!DATA.user.isAdmin);if(!DATA.user.isAdmin&&['history','update','avatar'].includes(document.querySelector('.page.active')?.id))showPage('home')}
 function renderStats(){const s=DATA.stats;document.getElementById('stats').innerHTML=[['Active vans',s.vans],['Pending',s.pending],['Completed',s.completed],['Issues',s.issues]].map(x=>'<div class="stat"><span>'+x[0]+'</span><b>'+x[1]+'</b></div>').join('')}
