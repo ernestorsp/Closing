@@ -33,7 +33,7 @@
     <h3>New team message</h3>
     <label>Audience<select name="station"><option value="ALL">All stations</option><option value="DJX3">DJX3</option><option value="DJX4">DJX4</option></select></label>
     <label>Message<textarea name="message" maxlength="500" rows="5" placeholder="Example: Before leaving, verify that every phone and battery pack is charging." required></textarea></label>
-    <div class="avatarComposerFooter"><span>Appears over the Home page until acknowledged.</span><button class="primary">SEND MESSAGE</button></div>
+    <div class="avatarComposerFooter"><span>Appears over the page the user is viewing until acknowledged.</span><button class="primary">SEND MESSAGE</button></div>
   </form>
   <div class="panel avatarMessagePanel"><div class="sectionTitle compact"><div><h3>Recent messages</h3><p>Read confirmations are counted automatically.</p></div><button type="button" class="ghost" onclick="loadAvatarAdminData(true)">Refresh</button></div><div id="avatarAdminMessages" class="avatarAdminMessages"><div class="historyLoading"><span class="spinner"></span> Loading messages…</div></div></div>
 </div>
