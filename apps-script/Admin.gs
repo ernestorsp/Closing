@@ -272,36 +272,40 @@ function ensureAvatarSheets_(ss){
   ensureSheet_(ss,APP.SHEETS.avatarMessages,['MessageID','MessageText','Station','Active','CreatedAt','CreatedByEmail','CreatedByName']);
   ensureSheet_(ss,APP.SHEETS.avatarAcks,['AckID','MessageID','UserEmail','UserName','AcknowledgedAt']);
 }
-function avatarPendingMessages_(ss,email,station){
+function avatarTextForLanguage_(text,language){
+  const value=String(text||'');if(String(language||'').toLowerCase()!=='es'||!value)return value;
+  try{const cache=CacheService.getScriptCache(),key='AVATAR_ES_'+hash_(value),saved=cache.get(key);if(saved)return saved;const translated=LanguageApp.translate(value,'en','es');cache.put(key,translated,21600);return translated}catch(e){return value}
+}
+function avatarPendingMessages_(ss,email,station,language){
   ensureAvatarSheets_(ss);
   const acknowledged=new Set(rowsTail_(ss.getSheetByName(APP.SHEETS.avatarAcks),2000).map(x=>String(x.MessageID)));
   return rowsTail_(ss.getSheetByName(APP.SHEETS.avatarMessages),500)
     .filter(x=>yes_(x.Active)&&!acknowledged.has(String(x.MessageID))&&['ALL',String(station||'').toUpperCase()].includes(String(x.Station||'ALL').toUpperCase()))
     .sort((x,y)=>String(x.CreatedAt||'').localeCompare(String(y.CreatedAt||'')))
-    .map(x=>({messageId:String(x.MessageID),text:String(x.MessageText||''),station:String(x.Station||'ALL'),createdAt:x.CreatedAt||'',createdByName:String(x.CreatedByName||'Admin'),requiresAck:true}));
+    .map(x=>({messageId:String(x.MessageID),text:avatarTextForLanguage_(x.MessageText,language),station:String(x.Station||'ALL'),createdAt:x.CreatedAt||'',createdByName:String(x.CreatedByName||'Admin'),requiresAck:true}));
 }
-function getAvatarMessages(token){
+function getAvatarMessages(token,language){
   const s=auth_(token),ss=db_(),u=s.user||user_(s.email),station=workingStation_(u);
-  return{messages:avatarPendingMessages_(ss,s.email,station)};
+  return{messages:avatarPendingMessages_(ss,s.email,station,language)};
 }
-function acknowledgeAvatarMessage(token,messageId){
+function acknowledgeAvatarMessage(token,messageId,language){
   const s=auth_(token),ss=db_(),u=s.user||user_(s.email),id=String(messageId||'').trim();
   if(!id)throw new Error('Message not found.');
   return lock_(()=>{
     ensureAvatarSheets_(ss);
     const station=workingStation_(u),message=rowsTail_(ss.getSheetByName(APP.SHEETS.avatarMessages),500).find(x=>String(x.MessageID)===id),prior=rowsTail_(ss.getSheetByName(APP.SHEETS.avatarAcks),2000).some(x=>String(x.MessageID)===id);
     if(!message)throw new Error('Message not found.');
-    if(prior||!yes_(message.Active))return{ok:true,claimed:false,messages:avatarPendingMessages_(ss,s.email,station)};
+    if(prior||!yes_(message.Active))return{ok:true,claimed:false,messages:avatarPendingMessages_(ss,s.email,station,language)};
     if(!['ALL',String(station).toUpperCase()].includes(String(message.Station||'ALL').toUpperCase()))throw new Error('This message is not assigned to your station.');
     append_(ss.getSheetByName(APP.SHEETS.avatarAcks),{AckID:Utilities.getUuid(),MessageID:id,UserEmail:s.email,UserName:String(u.Name||''),AcknowledgedAt:new Date()});
     update_(ss.getSheetByName(APP.SHEETS.avatarMessages),'MessageID',id,{Active:false});
     audit_(s.email,'ACK_AVATAR_MESSAGE','AVATAR_MESSAGE',id,'Read and accepted');
-    return{ok:true,claimed:true,messages:avatarPendingMessages_(ss,s.email,station)};
+    return{ok:true,claimed:true,messages:avatarPendingMessages_(ss,s.email,station,language)};
   });
 }
 function sendAvatarMessage(token,input){
   const a=requireAdmin_(token),ss=db_();input=input||{};
-  const text=String(input.message||'').trim(),station=String(input.station||'ALL').toUpperCase();
+  const enteredText=String(input.message||'').trim(),text=String(input.language||'').toLowerCase()==='es'?(()=>{try{return LanguageApp.translate(enteredText,'es','en')}catch(e){return enteredText}})():enteredText,station=String(input.station||'ALL').toUpperCase();
   if(!text)throw new Error('Write a message for the team.');
   if(text.length>500)throw new Error('The message must be 500 characters or less.');
   if(!['ALL'].concat(APP.WORK_STATIONS).includes(station))throw new Error('Select All, DJX3 or DJX4.');
@@ -309,9 +313,9 @@ function sendAvatarMessage(token,input){
   const id=Utilities.getUuid();
   append_(ss.getSheetByName(APP.SHEETS.avatarMessages),{MessageID:id,MessageText:text,Station:station,Active:true,CreatedAt:new Date(),CreatedByEmail:a.s.email,CreatedByName:String(a.u.Name||a.s.email)});
   audit_(a.s.email,'SEND_AVATAR_MESSAGE','AVATAR_MESSAGE',id,station+' · '+text);
-  return{ok:true,message:'Message sent through Closing Buddy.',data:getAvatarAdminData(token)};
+  return{ok:true,message:'Message sent through Closing Buddy.',data:getAvatarAdminData(token,input.language)};
 }
-function getAvatarAdminData(token){
+function getAvatarAdminData(token,language){
   requireAdmin_(token);const ss=db_();ensureAvatarSheets_(ss);
   const counts={};rowsTail_(ss.getSheetByName(APP.SHEETS.avatarAcks),3000).forEach(x=>counts[String(x.MessageID)]=(counts[String(x.MessageID)]||0)+1);
   return{messages:rowsTail_(ss.getSheetByName(APP.SHEETS.avatarMessages),200).sort((x,y)=>String(y.CreatedAt||'').localeCompare(String(x.CreatedAt||''))).map(x=>({messageId:String(x.MessageID),text:String(x.MessageText||''),station:String(x.Station||'ALL'),active:yes_(x.Active),createdAt:x.CreatedAt||'',createdByName:String(x.CreatedByName||x.CreatedByEmail||'Admin'),ackCount:counts[String(x.MessageID)]||0}))};
