@@ -6,7 +6,7 @@ const INVITATION_MANUALS=[
 ];
 
 function ensureAdminSheets_(ss){
-  ensureSheet_(ss,APP.SHEETS.users,['Email','Name','Role','DefaultStation','StationAccess','Active','PasswordHash','Salt','MustChange','InvitedAt','InvitedBy','LastLoginAt','UpdatedAt']);
+  ensureSheet_(ss,APP.SHEETS.users,['Email','Name','Role','DefaultStation','StationAccess','Active','PasswordHash','Salt','MustChange','InvitedAt','InvitedBy','LastLoginAt','UpdatedAt','PreferredLanguage']);
   ensureSheet_(ss,APP.SHEETS.vans,['VanID','VanNumber','VanType','HomeStation','CurrentStation','CurrentSpot','CurrentStatus','Active','LastInspectionAt','LastInspectionID','UpdatedAt']);
   ensureSheet_(ss,APP.SHEETS.rescueDrivers,['DriverID','Driver','Station','Email','Active','UpdatedAt']);
   ensureSheet_(ss,'USER_INVITATIONS',['InvitationID','Email','Name','Role','DefaultStation','StationAccess','TokenHash','Status','CreatedAt','CreatedBy','ExpiresAt','AcceptedAt']);
@@ -24,7 +24,13 @@ function allowedStations_(u){
   return APP.WORK_STATIONS.includes(value)?[value]:APP.WORK_STATIONS.slice();
 }
 function publicUser_(u){
-  return{email:norm_(u.Email),name:String(u.Name||''),role:managedRole_(u.Role),station:workingStation_(u),stationAccess:String(u.StationAccess||'Both'),allowedStations:allowedStations_(u),isAdmin:isAdmin_(u)};
+  return{email:norm_(u.Email),name:String(u.Name||''),role:managedRole_(u.Role),station:workingStation_(u),stationAccess:String(u.StationAccess||'Both'),allowedStations:allowedStations_(u),isAdmin:isAdmin_(u),language:preferredLanguage_(u)};
+}
+function preferredLanguage_(u){return String(u&&u.PreferredLanguage||'').toLowerCase()==='es'?'es':'en'}
+function setUserLanguage(token,language){
+  const s=auth_(token),ss=db_(),value=String(language||'').toLowerCase()==='es'?'es':'en';ensureAdminSheets_(ss);const u=user_(s.email);
+  if(!u||!update_(ss.getSheetByName(APP.SHEETS.users),'Email',u.Email,{PreferredLanguage:value,UpdatedAt:new Date()}))throw new Error('User not found.');
+  return{ok:true,language:value};
 }
 function managedRole_(role){return String(role||'Lead')==='User'?'Lead':String(role||'Lead')}
 function revokeUserSessions_(email){
@@ -285,22 +291,22 @@ function avatarPendingMessages_(ss,email,station,language){
     .map(x=>({messageId:String(x.MessageID),text:avatarTextForLanguage_(x.MessageText,language),station:String(x.Station||'ALL'),createdAt:x.CreatedAt||'',createdByName:String(x.CreatedByName||'Admin'),requiresAck:true}));
 }
 function getAvatarMessages(token,language){
-  const s=auth_(token),ss=db_(),u=s.user||user_(s.email),station=workingStation_(u);
-  return{messages:avatarPendingMessages_(ss,s.email,station,language)};
+  const s=auth_(token),ss=db_(),u=user_(s.email)||s.user,station=workingStation_(u),preferred=preferredLanguage_(u);
+  return{messages:avatarPendingMessages_(ss,s.email,station,preferred)};
 }
 function acknowledgeAvatarMessage(token,messageId,language){
-  const s=auth_(token),ss=db_(),u=s.user||user_(s.email),id=String(messageId||'').trim();
+  const s=auth_(token),ss=db_(),u=user_(s.email)||s.user,id=String(messageId||'').trim(),preferred=preferredLanguage_(u);
   if(!id)throw new Error('Message not found.');
   return lock_(()=>{
     ensureAvatarSheets_(ss);
     const station=workingStation_(u),message=rowsTail_(ss.getSheetByName(APP.SHEETS.avatarMessages),500).find(x=>String(x.MessageID)===id),prior=rowsTail_(ss.getSheetByName(APP.SHEETS.avatarAcks),2000).some(x=>String(x.MessageID)===id);
     if(!message)throw new Error('Message not found.');
-    if(prior||!yes_(message.Active))return{ok:true,claimed:false,messages:avatarPendingMessages_(ss,s.email,station,language)};
+    if(prior||!yes_(message.Active))return{ok:true,claimed:false,messages:avatarPendingMessages_(ss,s.email,station,preferred)};
     if(!['ALL',String(station).toUpperCase()].includes(String(message.Station||'ALL').toUpperCase()))throw new Error('This message is not assigned to your station.');
     append_(ss.getSheetByName(APP.SHEETS.avatarAcks),{AckID:Utilities.getUuid(),MessageID:id,UserEmail:s.email,UserName:String(u.Name||''),AcknowledgedAt:new Date()});
     update_(ss.getSheetByName(APP.SHEETS.avatarMessages),'MessageID',id,{Active:false});
     audit_(s.email,'ACK_AVATAR_MESSAGE','AVATAR_MESSAGE',id,'Read and accepted');
-    return{ok:true,claimed:true,messages:avatarPendingMessages_(ss,s.email,station,language)};
+    return{ok:true,claimed:true,messages:avatarPendingMessages_(ss,s.email,station,preferred)};
   });
 }
 function sendAvatarMessage(token,input){
