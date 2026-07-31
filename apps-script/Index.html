@@ -11,7 +11,27 @@
 <div id="app" hidden><header><div><b>AAXI Closing</b><small id="userName"></small></div><label class="station">Working at<select id="station"><option>DJX3</option><option>DJX4</option></select></label><button id="syncButton" class="headerSync" onclick="manualSync()" title="Sync latest data" aria-label="Sync latest data"><span class="syncIcon">↻</span><span class="syncLabel">Sync</span></button><button class="ghost" onclick="doLogout()">Log out</button></header>
 <nav><button data-page="home" class="active">Home</button><button data-page="pending">Inspections</button><button data-page="rescues">Rescues</button><button data-page="closingData">Closing</button><button data-page="notes">Notes</button><button data-page="history" data-admin-only>History</button><button data-page="update" data-admin-only>Update</button></nav>
 <main>
-<section id="home" class="page active"><div class="sectionTitle homeChecklistTitle"><h2>Closing checklist</h2></div><div id="closingChecklist" class="closingChecklist"></div></section>
+<section id="home" class="page active"><div class="sectionTitle homeChecklistTitle"><h2>Closing checklist</h2></div><div id="closingChecklist" class="closingChecklist"></div>
+<div id="homeMascot" class="homeMascot" aria-live="polite">
+  <button type="button" class="mascotMinimize" onclick="toggleMascot()" aria-label="Minimize closing buddy">−</button>
+  <button type="button" class="mascotCharacter" onclick="nextMascotMessage()" aria-label="Show another reminder">
+    <span class="mascotWaveArm"></span>
+    <span class="mascotBody"><span class="mascotVestLine"></span><span class="mascotSmileMark"></span></span>
+    <span class="mascotHead">
+      <span class="mascotCap"><span></span></span>
+      <span class="mascotEar left"></span><span class="mascotEar right"></span>
+      <span class="mascotEye left"></span><span class="mascotEye right"></span>
+      <span class="mascotBrow left"></span><span class="mascotBrow right"></span>
+      <span class="mascotMouth"></span>
+    </span>
+    <span class="mascotLeg left"></span><span class="mascotLeg right"></span>
+  </button>
+  <div class="mascotDialog">
+    <div class="mascotDialogTop"><strong>Closing Buddy</strong><span id="mascotStation">DJX3</span></div>
+    <p id="mascotMessage">Hey! I’m here to help with closing.</p>
+    <button type="button" onclick="nextMascotMessage()">Another reminder</button>
+  </div>
+</div></section>
 <section id="pending" class="page"><div class="sectionTitle"><div><h2>Van inspections</h2><p id="pendingMeta"></p></div><input id="vanSearch" placeholder="Search van"></div><div id="inspectionSkipPanel" class="panel inspectionSkipPanel"><div><h3>Skip remaining inspections</h3><p id="inspectionSkipMeta">An Admin must approve before Inspections becomes Ready.</p></div><button id="inspectionSkipBtn" class="skipRequestBtn" onclick="requestInspectionSkipNow(this)">REQUEST SKIP</button></div><div id="vanList" class="cards"></div></section>
 <section id="history" class="page"><div class="sectionTitle"><h2>Van history</h2><input id="historySearch" placeholder="Search van"></div><div id="historyVans" class="cards"></div><div id="historyList" class="cards"></div></section>
 <section id="update" class="page">
