@@ -140,11 +140,44 @@ function pickMascotAutomaticMessage(){
  const list=mascotAutomaticMessages(),available=list.filter(x=>!MASCOT_RECENT.includes(x.id)),pool=available.length?available:list,item=pool[Math.floor(Math.random()*pool.length)];
  MASCOT_RECENT.push(item.id);if(MASCOT_RECENT.length>10)MASCOT_RECENT.shift();return item;
 }
+function mascotScheduleKey(){return'aaxi_mascot_schedule_'+cacheDay()+'_'+String(DATA.user&&DATA.user.station||'DJX3')+'_'+String(DATA.user&&DATA.user.email||'user')}
+function mascotScheduleShown(){try{return new Set(JSON.parse(localStorage.getItem(mascotScheduleKey())||'[]'))}catch(e){return new Set()}}
+function saveMascotScheduleShown(shown){try{localStorage.setItem(mascotScheduleKey(),JSON.stringify([...shown]))}catch(e){}}
+function scheduledMascotMessages(){
+ const c=DATA.checklist||{},station=String(DATA.user&&DATA.user.station||'DJX3'),done=Number(c.inspectionsCompleted||0),total=Number(c.inspectionsTotal||0),pending=Math.max(0,total-done),messages=[],add=(id,at,window,en,es,condition=true)=>{if(condition)messages.push({id,at,until:at+window,text:APP_LANGUAGE==='es'?es:en,requiresAck:false,sender:'Closing Buddy',station})};
+ add('closing-start',17*60,35,'Closing time is starting. Take a calm look at the checklist and prepare the cage before the first drivers arrive.','Comienza la hora del cierre. Revisa la lista con calma y prepara el cage antes de que lleguen los primeros drivers.');
+ add('cage-ready',17*60+25,35,'Cage check: bring the signature sheet and the supplies drivers need to clean their vans. The first drivers will arrive soon.','Revisión del cage: lleva la hoja de firmas y los materiales que necesitan los drivers para limpiar las vans. Los primeros están por llegar.');
+ add('early-arrivals',17*60+50,45,'The first drivers are arriving. Stay near the cage, collect signatures and make sure van-cleaning supplies are ready.','Ya están llegando los primeros drivers. Quédate cerca del cage, recoge las firmas y ten listos los materiales para limpiar las vans.');
+ add('calm-operations',18*60+30,35,'Use this quieter period to check inspections, van spots and any damage notes before arrivals get busy.','Aprovecha este momento más tranquilo para revisar inspecciones, spots y notas de daños antes de que aumenten las llegadas.',pending>0);
+ if(station==='DJX3'){
+  add('dvic-reminder',19*60+40,30,'DVIC reminder: review the drivers who need to be recorded before the heavy return period begins.','Recordatorio de DVIC: revisa los drivers que debes registrar antes de que comience el período fuerte de regreso.');
+  add('pre-rush-check',20*60+5,25,'Before the DJX3 rush, review pickups, returned packages, rescues and anything still missing from Closing.','Antes de la hora fuerte de DJX3, revisa los pickups, paquetes retornados, rescates y cualquier dato pendiente del cierre.',!c.pickupReady||!c.returnedPackagesReady||!c.rescuesReady);
+  add('rush-start',20*60+28,25,'DJX3 heavy arrivals are about to begin. Stay ready at the cage for drivers, signatures, cleaning supplies and van inspections.','Está por comenzar el mayor volumen de llegadas en DJX3. Mantente listo en el cage para recibir drivers, firmas, materiales de limpieza e inspecciones.');
+  add('rush-progress',21*60+10,25,'DJX3 is in the busiest return period. Keep the cage organized and watch the inspection list—'+pending+' van'+(pending===1?' is':'s are')+' still pending.','DJX3 está en el período más fuerte de regreso. Mantén el cage organizado y revisa las inspecciones: todavía '+(pending===1?'queda 1 van':'quedan '+pending+' vans')+'.',pending>0);
+  add('charge-equipment',21*60+40,25,'If all drivers are back, put the phones and battery packs on charge now. Tomorrow does not need any zero-percent surprises. 🔋','Si ya regresaron todos los drivers, pon ahora los teléfonos y las baterías a cargar. Mañana no necesita sorpresas de 0%. 🔋');
+  add('final-review-time',22*60,40,'Final DJX3 review: confirm charging equipment, remaining inspections, spots and Closing Notes before finishing.','Revisión final de DJX3: confirma los equipos cargando, inspecciones pendientes, spots y Closing Notes antes de terminar.',!c.notesSent);
+ }else{
+  add('pre-rush-check',18*60+40,20,'DJX4 heavy arrivals start early. Review pickups, returned packages, rescues and pending Closing information now.','La hora fuerte de DJX4 comienza temprano. Revisa ahora los pickups, paquetes retornados, rescates y los datos pendientes del cierre.',!c.pickupReady||!c.returnedPackagesReady||!c.rescuesReady);
+  add('dvic-rush',19*60+5,25,'DJX4 heavy arrivals are beginning. Stay ready at the cage and remember the DVIC drivers between 7:00 and 7:30.','Está comenzando el mayor volumen de llegadas en DJX4. Mantente listo en el cage y recuerda los drivers DVIC entre 7:00 y 7:30.');
+  add('rush-progress',19*60+50,25,'DJX4 is near the end of its busiest return period. Keep signatures and inspections moving—'+pending+' van'+(pending===1?' is':'s are')+' still pending.','DJX4 está cerca del final de su período más fuerte. Mantén en movimiento las firmas y las inspecciones: todavía '+(pending===1?'queda 1 van':'quedan '+pending+' vans')+'.',pending>0);
+  add('charge-equipment',20*60+10,20,'If all drivers are back, put the DJX4 phones and battery packs on charge now. 🔋','Si ya regresaron todos los drivers, pon ahora a cargar los teléfonos y las baterías de DJX4. 🔋');
+  add('final-review-time',20*60+25,40,'Final DJX4 review: confirm charging equipment, remaining inspections, spots and Closing Notes before finishing.','Revisión final de DJX4: confirma los equipos cargando, inspecciones pendientes, spots y Closing Notes antes de terminar.',!c.notesSent);
+ }
+ return messages;
+}
+function runMascotSchedule(){
+ if(document.visibilityState==='hidden'||!DATA.user||(DATA.avatarMessages||[]).length||MASCOT_CURRENT)return false;
+ const now=new Date(),minutes=now.getHours()*60+now.getMinutes(),shown=mascotScheduleShown(),due=scheduledMascotMessages().filter(x=>minutes>=x.at&&minutes<=x.until&&!shown.has(x.id)).sort((a,b)=>b.at-a.at);
+ if(!due.length)return false;due.forEach(x=>shown.add(x.id));saveMascotScheduleShown(shown);showMascotMessage(due[0]);return true;
+}
+function showMascotWelcomeOnce(){
+ const shown=mascotScheduleShown();if(shown.has('welcome'))return false;shown.add('welcome');saveMascotScheduleShown(shown);showMascotMessage({id:'welcome',text:APP_LANGUAGE==='es'?'¡Hola '+String(DATA.user.name||'').split(' ')[0]+'! Closing Buddy está listo en '+DATA.user.station+'. Te avisaré en los momentos importantes del cierre.':'Hey '+String(DATA.user.name||'').split(' ')[0]+'! Closing Buddy is ready at '+DATA.user.station+'. I will check in at the important moments during closing.',requiresAck:false,sender:'Closing Buddy',station:DATA.user.station});return true;
+}
 function startMascotSystem(){
  if(!DATA.user||MASCOT_STARTED)return;MASCOT_STARTED=true;
  DATA.avatarMessages=Array.isArray(DATA.avatarMessages)?DATA.avatarMessages:[];
- setTimeout(()=>{if((DATA.avatarMessages||[]).length)pollAvatarMessages(true);else showMascotMessage({id:'welcome',text:APP_LANGUAGE==='es'?'¡Hola '+String(DATA.user.name||'').split(' ')[0]+'! Closing Buddy está listo en '+DATA.user.station+'. Solo aparezco cuando tengo algo útil… o gracioso.':'Hey '+String(DATA.user.name||'').split(' ')[0]+'! Closing Buddy is ready at '+DATA.user.station+'. I only pop up when I have something useful… or funny.',requiresAck:false,sender:'Closing Buddy',station:DATA.user.station})},900);
- MASCOT_TIMER=setInterval(()=>{if(document.visibilityState!=='hidden'&&!(DATA.avatarMessages||[]).length)showMascotMessage(pickMascotAutomaticMessage())},30*60*1000);
+ setTimeout(()=>{if((DATA.avatarMessages||[]).length)pollAvatarMessages(true);else if(!runMascotSchedule())showMascotWelcomeOnce()},900);
+ MASCOT_TIMER=setInterval(runMascotSchedule,60*1000);
  MASCOT_POLL_TIMER=setInterval(pollAvatarMessages,15*1000);
 }
 function showMascotMessage(item){
