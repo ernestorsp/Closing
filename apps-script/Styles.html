@@ -205,9 +205,9 @@ input::placeholder,textarea::placeholder{color:#93a2aa}
 .homeMascot::after{display:none}
 .homeMascot .mascotCharacter{width:150px;height:165px;pointer-events:none}
 .homeMascot .mascotImage{width:150px;height:165px;filter:drop-shadow(0 9px 9px #0d2d4540)}
-.homeMascot .mascotDialog{min-height:0;margin-bottom:12px;padding:14px 16px;border-color:#c3d4db;border-radius:14px;box-shadow:0 14px 38px #0b263b2b;pointer-events:none}
+.homeMascot .mascotDialog{min-height:0;margin-bottom:12px;padding:14px 16px;border-color:#c3d4db;border-radius:14px;box-shadow:0 14px 38px #0b263b2b;pointer-events:auto}
 .homeMascot .mascotDialog p{min-height:0;margin:8px 0 10px}
-.homeMascot .mascotActions{gap:7px}.homeMascot .mascotActions button{pointer-events:auto}
+.homeMascot .mascotActions{gap:7px}
 
 /* Inspections uses the same clean card language and spacing as Home */
 #pending>.sectionTitle{margin-top:4px;padding:0 2px}
@@ -221,6 +221,7 @@ input::placeholder,textarea::placeholder{color:#93a2aa}
 #pending #vanList .cardActions{align-self:center}
 #pending #vanList .secondary{min-width:92px}
 .quickButtonSpinner{margin-right:7px}
+.leadTapSpinner{position:fixed;width:22px;height:22px;border:3px solid #ffffffaa;border-top-color:var(--teal);border-radius:50%;animation:spin .55s linear infinite;pointer-events:none;z-index:10020;box-sizing:border-box;filter:drop-shadow(0 1px 3px #173f5f66)}
 @media(max-width:760px){.homeMascot{right:10px;bottom:10px;grid-template-columns:100px minmax(0,1fr);gap:0;max-width:calc(100vw - 20px)}.homeMascot .mascotCharacter,.homeMascot .mascotImage{width:100px;height:125px}.homeMascot .mascotDialog{margin-bottom:4px;padding:12px}.homeMascot .mascotDialogTop strong{font-size:14px}.homeMascot .mascotDialog p{font-size:13px}.homeMascot .mascotActions button{width:auto;min-height:34px;padding:7px 10px}#pending #vanList{grid-template-columns:1fr}}
 
 </style>
