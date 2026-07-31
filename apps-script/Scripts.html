@@ -1,5 +1,5 @@
 <script>
-let TOKEN=localStorage.getItem('closing_token')||'',DATA={},CURRENT=null,DAMAGE_ANSWER='',busy=false,PHOTO_UPLOADS=new Set(),LOCATION_BUSY=false,LOCATION_CONFIRM_PENDING=false,FINISHING=false,HISTORY_ROWS=[],HISTORY_VAN_ID='',RESCUE_SAVING=false,CLOSING_SAVING=false,CLOSING_DRAFT=null,NOTES_SENDING=false,NOTE_PHOTOS=[],NOTE_PHOTO_LOADING=0,SKIP_REQUESTING=false,ADMIN_DATA=null,ADMIN_LOADING=false,APP_BOOTED=false,SYNCING=false,INSPECTION_CLAIMING=false,INSPECTION_CLAIM_QUEUE=[],BLOCKED_VANS=new Set(),MASCOT_INDEX=0,MASCOT_TIMER=null;
+let TOKEN=localStorage.getItem('closing_token')||'',DATA={},CURRENT=null,DAMAGE_ANSWER='',busy=false,PHOTO_UPLOADS=new Set(),LOCATION_BUSY=false,LOCATION_CONFIRM_PENDING=false,FINISHING=false,HISTORY_ROWS=[],HISTORY_VAN_ID='',RESCUE_SAVING=false,CLOSING_SAVING=false,CLOSING_DRAFT=null,NOTES_SENDING=false,NOTE_PHOTOS=[],NOTE_PHOTO_LOADING=0,SKIP_REQUESTING=false,ADMIN_DATA=null,ADMIN_LOADING=false,APP_BOOTED=false,SYNCING=false,INSPECTION_CLAIMING=false,INSPECTION_CLAIM_QUEUE=[],BLOCKED_VANS=new Set(),MASCOT_TIMER=null,MASCOT_POLL_TIMER=null,MASCOT_HIDE_TIMER=null,MASCOT_RECENT=[],MASCOT_CURRENT=null,MASCOT_STARTED=false,AVATAR_ADMIN_DATA=null,AVATAR_ADMIN_LOADING=false;
 const APP_CACHE_KEY='aaxi_closing_app_cache_v2';
 document.addEventListener('DOMContentLoaded',()=>{bind();setInterval(expireLocalInspections,15000);window.addEventListener('message',receiveParentMessage);if(window.CLOSING_ENTRY&&CLOSING_ENTRY.mode==='invite'){TOKEN='';saveSessionToken('');bootApp()}else if(window.top!==window){requestParentToken();setTimeout(requestParentToken,400);setTimeout(requestParentToken,1000);setTimeout(bootApp,1800)}else bootApp()});
 function requestParentToken(){if(!APP_BOOTED&&window.top!==window)window.top.postMessage({type:'aaxi-closing-token-request'},'*')}
@@ -31,17 +31,102 @@ function moveDriverCaretToEnd(event){const input=event.target;if(!input.matches|
 function cacheDay(v){const d=new Date(v||Date.now());return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
 function readAppCache(){try{const saved=JSON.parse(localStorage.getItem(APP_CACHE_KEY)||'null');if(!saved||!saved.data||!saved.data.user||cacheDay(saved.savedAt)!==cacheDay())return null;return saved.data}catch(e){localStorage.removeItem(APP_CACHE_KEY);return null}}
 function saveAppCache(data){try{localStorage.setItem(APP_CACHE_KEY,JSON.stringify({savedAt:Date.now(),data}))}catch(e){}}
-function applyAppData(d){DATA=d;restoreRescueDraft();restoreClosingDraft();document.getElementById('auth').style.display='none';document.getElementById('app').hidden=false;document.getElementById('userName').textContent=d.user.name+' · '+d.user.email;renderAccess();document.getElementById('station').innerHTML=(d.user.allowedStations||['DJX3','DJX4']).map(x=>'<option>'+esc(x)+'</option>').join('');document.getElementById('station').value=d.user.station;renderAll();showSessionLoading(false);notifyAppReady()}
+function applyAppData(d){DATA=d;restoreRescueDraft();restoreClosingDraft();document.getElementById('auth').style.display='none';document.getElementById('app').hidden=false;document.getElementById('userName').textContent=d.user.name+' · '+d.user.email;renderAccess();document.getElementById('station').innerHTML=(d.user.allowedStations||['DJX3','DJX4']).map(x=>'<option>'+esc(x)+'</option>').join('');document.getElementById('station').value=d.user.station;renderAll();startMascotSystem();if((DATA.avatarMessages||[]).length)setTimeout(showPendingAvatarMessage,120);showSessionLoading(false);notifyAppReady()}
 function loadApp(){const cached=readAppCache();if(cached)applyAppData(cached);else showSessionLoading(true);syncAppData(false,!cached)}
 function setSyncState(syncing){SYNCING=syncing;const b=document.getElementById('syncButton');if(!b)return;b.disabled=syncing;b.classList.toggle('syncing',syncing);b.querySelector('.syncLabel').textContent=syncing?'Syncing…':'Sync'}
 function syncAppData(manual,blocking,force){if(SYNCING&&!blocking)return;if(!blocking)setSyncState(true);google.script.run.withSuccessHandler(d=>{saveAppCache(d);applyAppData(d);setSyncState(false);if(manual)toast('Everything is synchronized.')}).withFailureHandler(e=>{setSyncState(false);showSessionLoading(false);const message=e.message||String(e);if(message.includes('AUTH_REQUIRED')){localStorage.removeItem(APP_CACHE_KEY);authFail(e)}else toast(readAppCache()?'Could not synchronize. Showing the saved data.':message,true)}).getAppData(TOKEN,!!manual||!!force)}
 function manualSync(){syncAppData(true,false)}
-function renderAll(){renderChecklist();renderVans();if(DATA.user.isAdmin)renderHistoryVans();renderRescues();renderClosingData();renderNotes();renderMascot()}
-function mascotMessages(){const c=DATA.checklist||{},station=String(DATA.user&&DATA.user.station||'DJX3'),now=new Date(),minutes=now.getHours()*60+now.getMinutes(),returnMinutes=station==='DJX4'?20*60:21*60+40,pending=Math.max(0,Number(c.inspectionsTotal||0)-Number(c.inspectionsCompleted||0)),messages=[{text:'Hey! Closing Buddy reporting for '+station+'. I brought reminders... and a very large head.',kind:'hello'}];if(pending)messages.push({text:pending+' van'+(pending===1?' is':'s are')+' still waiting for inspection. They are pretending not to see us. 👀'});if(!c.pickupReady)messages.push({text:'Quick check: did every pickup make it back, or is one still out sightseeing?'});if(!c.returnedPackagesReady)messages.push({text:'How many packages are going back? Count them now before they start multiplying. 📦'});if(!c.rescuesReady)messages.push({text:'Rescues are still pending. Let’s save them before somebody needs a rescue from the rescue list.'});if(minutes>=returnMinutes-70&&minutes<=returnMinutes+120){messages.push({text:'Return time is close! Are the drivers cleaning their vans, or just giving the dashboard a motivational stare?'});messages.push({text:'Phones and battery packs need charging. Tomorrow-you says thank you. 🔋'});}if(c.inspectionsReady&&c.rescuesReady&&c.pickupReady&&c.returnedPackagesReady&&c.routesTomorrowReady&&!c.notesSent)messages.push({text:'Everything is Ready! Send Closing Notes and let this big head finally relax.'});if(c.notesSent)messages.push({text:'Closing Notes sent! Great job. I would high-five you, but one arm is busy waving.'});messages.push({text:'Tiny reminder: check vans, spots and returned packages. Tiny reminder... giant head.'});return messages}
-function renderMascot(){const box=document.getElementById('homeMascot'),message=document.getElementById('mascotMessage'),station=document.getElementById('mascotStation');if(!box||!message||!station||!DATA.user)return;const list=mascotMessages();if(MASCOT_INDEX>=list.length)MASCOT_INDEX=0;station.textContent=DATA.user.station||'DJX3';message.textContent=list[MASCOT_INDEX].text;if(!MASCOT_TIMER)MASCOT_TIMER=setInterval(()=>{if(document.visibilityState!=='hidden')nextMascotMessage()},14000)}
-function nextMascotMessage(){const list=mascotMessages();MASCOT_INDEX=(MASCOT_INDEX+1)%list.length;renderMascot();const box=document.getElementById('homeMascot');if(box){box.classList.remove('mascotTalking');void box.offsetWidth;box.classList.add('mascotTalking')}}
-function toggleMascot(){const box=document.getElementById('homeMascot');if(!box)return;box.classList.toggle('minimized');const button=box.querySelector('.mascotMinimize');if(button)button.setAttribute('aria-label',box.classList.contains('minimized')?'Expand closing buddy':'Minimize closing buddy')}
-function renderAccess(){document.querySelectorAll('[data-admin-only]').forEach(x=>x.hidden=!DATA.user.isAdmin);if(!DATA.user.isAdmin&&document.querySelector('.page.active')?.id==='history')showPage('home')}
+function renderAll(){renderChecklist();renderVans();if(DATA.user.isAdmin)renderHistoryVans();renderRescues();renderClosingData();renderNotes()}
+function mascotAutomaticMessages(){
+ const c=DATA.checklist||{},station=String(DATA.user&&DATA.user.station||'DJX3'),now=new Date(),minutes=now.getHours()*60+now.getMinutes(),returnMinutes=station==='DJX4'?20*60:21*60+40,completed=Number(c.inspectionsCompleted||0),total=Number(c.inspectionsTotal||0),pending=Math.max(0,total-completed),messages=[];
+ const add=(id,text)=>messages.push({id,text,requiresAck:false,sender:'Closing Buddy',station});
+ if(minutes>=20*60&&completed<10){
+   add('late-inspection-1','It’s after 8 PM and only '+completed+' vans are inspected. Are we inspecting vans today, or are they inspecting us? 👀');
+   add('late-inspection-2','Clock check: after 8 PM, '+completed+' inspections. My giant head is starting to worry about those vans.');
+   add('late-inspection-3','The vans asked if tonight is a holiday. We have '+completed+' inspected so far—let’s surprise them.');
+ }
+ if(pending){
+   add('pending-1',pending+' van'+(pending===1?' is':'s are')+' still waiting for inspection. They are pretending not to see us.');
+   add('pending-2','Progress check: '+completed+' of '+total+' vans inspected. Only '+pending+' left between you and victory.');
+   add('pending-3','There are '+pending+' vans left. One at a time—big-head math says you’ve got this.');
+   add('pending-4',pending+' vans remain. The finish line is closer than it looks from down here.');
+   if(pending<=5)add('pending-close','Only '+pending+' vans left! Closing Buddy can practically smell the finish line.');
+ }
+ if(!c.pickupReady){
+   add('pickup-1','Quick check: did every pickup make it back, or is one still out sightseeing?');
+   add('pickup-2','Pickup patrol! Confirm they were delivered before the day sneaks away.');
+   add('pickup-3','Friendly nudge: review today’s pickups. Empty lockers also deserve an honest note.');
+ }
+ if(!c.returnedPackagesReady){
+   add('returns-1','How many packages are going back? Count them now before they start multiplying. 📦');
+   add('returns-2','Return packages roll call: everybody accounted for?');
+   add('returns-3','Before the boxes form a union, confirm the returned-package count.');
+ }
+ if(!c.rescuesReady){
+   add('rescues-1','Rescues are still pending. Save them before somebody needs a rescue from the rescue list.');
+   add('rescues-2','Rescue check: drivers helped, stops moved, numbers saved. Let’s close that loop.');
+   add('rescues-3','The rescue section is waving at us. I would wave back, but this arm is already busy.');
+ }
+ if(minutes>=returnMinutes-70&&minutes<=returnMinutes+120){
+   add('clean-vans-1','Return time is close! Are the drivers cleaning their vans, or just giving the dashboard a motivational stare?');
+   add('clean-vans-2','Van cleanliness check: tomorrow’s drivers should not find today’s snack museum.');
+   add('charge-1','Phones and battery packs need charging. Tomorrow-you says thank you. 🔋');
+   add('charge-2','Plug in phones and batteries now. Zero-percent surprises are not a closing tradition.');
+ }
+ if(c.inspectionsReady&&c.rescuesReady&&c.pickupReady&&c.returnedPackagesReady&&c.routesTomorrowReady&&!c.notesSent){
+   add('notes-1','Everything is Ready! Send Closing Notes and let this big head finally relax.');
+   add('notes-2','All green except the email. Send Closing Notes and bring this landing home.');
+ }
+ if(c.notesSent){
+   add('done-1','Closing Notes sent! Great job. I would high-five you, but one arm is busy waving.');
+   add('done-2','Mission complete. Clean work today—Closing Buddy approves.');
+ }
+ add('motivate-1','Steady progress beats frantic clicking. One clean step at a time.');
+ add('motivate-2','You’re closer than you were 15 minutes ago. That counts, even with my terrible math.');
+ add('motivate-3','Keep going—the last part of closing always looks bigger before it gets done.');
+ add('motivate-4','Professional, calm, complete. That’s the closing recipe. The giant head is optional.');
+ add('motivate-5','Small checks prevent big surprises tomorrow. Future shift says thanks.');
+ return messages;
+}
+function pickMascotAutomaticMessage(){
+ const list=mascotAutomaticMessages(),available=list.filter(x=>!MASCOT_RECENT.includes(x.id)),pool=available.length?available:list,item=pool[Math.floor(Math.random()*pool.length)];
+ MASCOT_RECENT.push(item.id);if(MASCOT_RECENT.length>6)MASCOT_RECENT.shift();return item;
+}
+function startMascotSystem(){
+ if(!DATA.user||MASCOT_STARTED)return;MASCOT_STARTED=true;
+ DATA.avatarMessages=Array.isArray(DATA.avatarMessages)?DATA.avatarMessages:[];
+ setTimeout(()=>{if((DATA.avatarMessages||[]).length)showPendingAvatarMessage();else showMascotMessage({id:'welcome',text:'Hey '+String(DATA.user.name||'').split(' ')[0]+'! Closing Buddy is ready at '+DATA.user.station+'. I only pop up when I have something useful… or funny.',requiresAck:false,sender:'Closing Buddy',station:DATA.user.station})},900);
+ MASCOT_TIMER=setInterval(()=>{if(document.visibilityState!=='hidden'&&!(DATA.avatarMessages||[]).length)showMascotMessage(pickMascotAutomaticMessage())},15*60*1000);
+ MASCOT_POLL_TIMER=setInterval(pollAvatarMessages,60*1000);
+}
+function showMascotMessage(item){
+ const box=document.getElementById('homeMascot');if(!box||!item||document.querySelector('.page.active')?.id!=='home')return;
+ clearTimeout(MASCOT_HIDE_TIMER);MASCOT_CURRENT=item;
+ document.getElementById('mascotMessage').textContent=item.text;
+ document.getElementById('mascotStation').textContent=item.station==='ALL'?'ALL':(item.station||DATA.user.station);
+ document.getElementById('mascotSender').textContent=item.requiresAck?(item.sender||'Admin'):'Closing Buddy';
+ document.getElementById('mascotAck').hidden=!item.requiresAck;
+ document.getElementById('mascotDismiss').hidden=!!item.requiresAck;
+ box.hidden=false;box.classList.remove('mascotTalking');void box.offsetWidth;box.classList.add('mascotTalking');
+ if(!item.requiresAck)MASCOT_HIDE_TIMER=setTimeout(dismissMascot,22000);
+}
+function dismissMascot(){
+ if(MASCOT_CURRENT&&MASCOT_CURRENT.requiresAck)return;
+ clearTimeout(MASCOT_HIDE_TIMER);const box=document.getElementById('homeMascot');if(box)box.hidden=true;MASCOT_CURRENT=null;
+}
+function showPendingAvatarMessage(){
+ const item=(DATA.avatarMessages||[])[0];if(!item)return;
+ showMascotMessage({id:item.messageId,messageId:item.messageId,text:item.text,station:item.station||DATA.user.station,sender:item.createdByName||'Admin',requiresAck:true});
+}
+function pollAvatarMessages(){
+ if(!TOKEN||!DATA.user)return;
+ google.script.run.withSuccessHandler(r=>{DATA.avatarMessages=r.messages||[];if(DATA.avatarMessages.length&&(!MASCOT_CURRENT||!MASCOT_CURRENT.requiresAck))showPendingAvatarMessage()}).withFailureHandler(()=>{}).getAvatarMessages(TOKEN);
+}
+function acknowledgeMascotMessage(){
+ if(!MASCOT_CURRENT||!MASCOT_CURRENT.requiresAck)return;const id=MASCOT_CURRENT.messageId,button=document.getElementById('mascotAck');button.disabled=true;
+ google.script.run.withSuccessHandler(r=>{button.disabled=false;DATA.avatarMessages=r.messages||[];MASCOT_CURRENT=null;const box=document.getElementById('homeMascot');if(box)box.hidden=true;toast('Message marked as read.');if(DATA.avatarMessages.length)setTimeout(showPendingAvatarMessage,450)}).withFailureHandler(e=>{button.disabled=false;toast(e.message||String(e),true)}).acknowledgeAvatarMessage(TOKEN,id);
+}
+function renderAccess(){document.querySelectorAll('[data-admin-only]').forEach(x=>x.hidden=!DATA.user.isAdmin);if(!DATA.user.isAdmin&&['history','update','avatar'].includes(document.querySelector('.page.active')?.id))showPage('home')}
 function renderStats(){const s=DATA.stats;document.getElementById('stats').innerHTML=[['Active vans',s.vans],['Pending',s.pending],['Completed',s.completed],['Issues',s.issues]].map(x=>'<div class="stat"><span>'+x[0]+'</span><b>'+x[1]+'</b></div>').join('')}
 function checklistCard(title,detail,ready){return'<article class="checklistItem '+(ready?'ready':'pending')+'"><span class="checkIcon">'+(ready?'✓':'○')+'</span><div><h3>'+esc(title)+'</h3><p>'+esc(detail)+'</p></div><strong>'+(ready?'Ready':'Pending')+'</strong></article>'}
 function renderChecklist(){const box=document.getElementById('closingChecklist');if(!box)return;const c=DATA.checklist||{},done=Number(c.inspectionsCompleted||0),total=Number(c.inspectionsTotal||0),inspectionsReady=!!c.inspectionsReady,inspectionDetail=c.inspectionsSkipped?'Approved skip · '+done+' / '+total+' completed':done+' / '+total+' completed';box.innerHTML=checklistCard('Van inspections',inspectionDetail,inspectionsReady)+checklistCard('Rescues',c.rescuesReady?'Daily rescues saved':'Waiting for SAVE',!!c.rescuesReady)+checklistCard('Pick up',c.pickupReady?'Daily value saved':'Waiting for Closing SAVE',!!c.pickupReady)+checklistCard('Returned Packages',c.returnedPackagesReady?'Package count saved':'Waiting for Closing SAVE',!!c.returnedPackagesReady)+checklistCard('Routes for Tomorrow',c.routesTomorrowReady?'Route count saved':'Waiting for Closing SAVE',!!c.routesTomorrowReady)+checklistCard('Send Closing Notes',c.notesSent?'Closing notes sent':'Waiting to send closing notes',!!c.notesSent)}
@@ -149,9 +234,22 @@ function backToHistoryVans(){HISTORY_ROWS=[];HISTORY_VAN_ID='';document.getEleme
 function openHistoryInspection(id){document.getElementById('historyList').innerHTML='<div class="historyLoading"><span class="spinner"></span> Loading inspection…</div>';google.script.run.withSuccessHandler(renderHistoryDetail).withFailureHandler(e=>{renderHistoryRows();toast(e.message||String(e),true)}).getCompletedInspection(TOKEN,id)}
 function renderHistoryDetail(d){const photos=new Map(d.photos.map(p=>[p.Part,p])),defects=d.damages||[];document.getElementById('historyList').innerHTML='<button class="back" onclick="renderHistoryRows()">← Back to inspections</button><article class="panel historyDetail"><h2>'+esc(d.inspection.VanNumber)+'</h2><div class="meta">'+fmt(d.inspection.CompletedAt)+' · '+esc(d.inspection.Station)+' '+esc(d.inspection.Spot||'')+' · '+esc(d.inspection.Status)+'</div><p><b>Completed by:</b> '+esc(d.inspection.UserName||d.inspection.UserEmail||'Unknown')+'</p><p>'+esc(d.inspection.Notes||'No notes')+'</p><h3>Inspection photos</h3><div class="historyPhotos">'+d.requiredParts.map(part=>{const p=photos.get(part);return p?'<button class="photoViewBtn" onclick="historyPhoto(\''+esc(d.inspection.InspectionID)+'\',\''+esc(p.PhotoID)+'\',\''+esc(part)+'\')">📷 '+esc(part)+'</button>':'<button class="photoViewBtn" disabled>'+esc(part)+' · Missing</button>'}).join('')+'</div><h3>Reported defects</h3><div class="historyPhotos">'+(defects.length?defects.map(x=>'<button class="photoViewBtn" onclick="historyPhoto(\''+esc(d.inspection.InspectionID)+'\',\''+esc(x.PhotoID)+'\',\''+esc(x.Part)+'\')">⚠️ '+esc(x.Part)+' · '+esc(x.Severity||'')+'</button>').join(''):'<span class="meta">No defects reported.</span>')+'</div></article>'}
 function historyPhoto(inspectionId,photoId,part){document.getElementById('photoModalTitle').textContent=part;document.getElementById('previousMeta').textContent='Loading photo…';document.getElementById('previousImage').removeAttribute('src');document.getElementById('photoModal').hidden=false;google.script.run.withSuccessHandler(r=>{document.getElementById('previousImage').src=r.image;document.getElementById('previousMeta').textContent=fmt(r.capturedAt)+' · '+(r.assessment||'Inspection photo')}).withFailureHandler(e=>{closeModal();toast(e.message||String(e),true)}).getInspectionPhoto(TOKEN,inspectionId,photoId)}
-function showPage(id){if(['history','update'].includes(id)&&!(DATA.user&&DATA.user.isAdmin))return toast('Admin permission required.',true);document.querySelectorAll('.page').forEach(x=>x.classList.toggle('active',x.id===id));document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('active',x.dataset.page===id));if(id==='history'){document.getElementById('historyList').innerHTML='';renderHistoryVans()}if(id==='update')loadAdminData()}
+function loadAvatarAdminData(force){
+ if(AVATAR_ADMIN_LOADING||!(DATA.user&&DATA.user.isAdmin)||(!force&&AVATAR_ADMIN_DATA))return force?null:renderAvatarAdminData();
+ AVATAR_ADMIN_LOADING=true;const box=document.getElementById('avatarAdminMessages');if(box)box.innerHTML='<div class="historyLoading"><span class="spinner"></span> Loading messages…</div>';
+ google.script.run.withSuccessHandler(d=>{AVATAR_ADMIN_LOADING=false;AVATAR_ADMIN_DATA=d;renderAvatarAdminData()}).withFailureHandler(e=>{AVATAR_ADMIN_LOADING=false;if(box)box.innerHTML='';toast(e.message||String(e),true)}).getAvatarAdminData(TOKEN);
+}
+function renderAvatarAdminData(){
+ const box=document.getElementById('avatarAdminMessages');if(!box||!AVATAR_ADMIN_DATA)return;
+ const rows=AVATAR_ADMIN_DATA.messages||[];box.innerHTML=rows.map(x=>'<article class="avatarAdminCard"><div><span class="avatarAudience">'+esc(x.station==='ALL'?'All stations':x.station)+'</span><strong>'+esc(x.createdByName||'Admin')+'</strong></div><p>'+esc(x.text)+'</p><footer><span>'+fmt(x.createdAt)+'</span><b>✓ '+Number(x.ackCount||0)+' read</b></footer></article>').join('')||empty('No avatar messages have been sent yet.');
+}
+function sendAvatarAdminMessage(event){
+ event.preventDefault();const formEl=event.target,input=form(formEl),button=formEl.querySelector('button.primary'),label=button.textContent;button.disabled=true;button.textContent='SENDING…';
+ google.script.run.withSuccessHandler(r=>{button.disabled=false;button.textContent=label;formEl.reset();AVATAR_ADMIN_DATA=r.data;renderAvatarAdminData();toast(r.message||'Message sent.')}).withFailureHandler(e=>{button.disabled=false;button.textContent=label;toast(e.message||String(e),true)}).sendAvatarMessage(TOKEN,input);
+}
+function showPage(id){if(['history','update','avatar'].includes(id)&&!(DATA.user&&DATA.user.isAdmin))return toast('Admin permission required.',true);document.querySelectorAll('.page').forEach(x=>x.classList.toggle('active',x.id===id));document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('active',x.dataset.page===id));if(id==='history'){document.getElementById('historyList').innerHTML='';renderHistoryVans()}if(id==='update')loadAdminData();if(id==='avatar')loadAvatarAdminData();if(id==='home'&&(DATA.avatarMessages||[]).length)setTimeout(showPendingAvatarMessage,100)}
 function closeModal(e){if(e&&e.target!==document.getElementById('photoModal'))return;document.getElementById('photoModal').hidden=true;document.getElementById('previousImage').src=''}
-function doLogout(){const t=TOKEN;TOKEN='';saveSessionToken('');localStorage.removeItem(APP_CACHE_KEY);google.script.run.logout(t);document.getElementById('app').hidden=true;showAuth()}
+function doLogout(){const t=TOKEN;TOKEN='';saveSessionToken('');localStorage.removeItem(APP_CACHE_KEY);clearInterval(MASCOT_TIMER);clearInterval(MASCOT_POLL_TIMER);clearTimeout(MASCOT_HIDE_TIMER);MASCOT_TIMER=MASCOT_POLL_TIMER=MASCOT_HIDE_TIMER=null;MASCOT_STARTED=false;MASCOT_CURRENT=null;const mascot=document.getElementById('homeMascot');if(mascot)mascot.hidden=true;google.script.run.logout(t);document.getElementById('app').hidden=true;showAuth()}
 function showAuth(){showSessionLoading(false);showAuthForm('loginForm');document.getElementById('app').hidden=true;notifyAppReady()}
 function showAuthForm(id){document.getElementById('auth').style.display='grid';['loginForm','forgotForm','resetForm','inviteForm','passwordForm'].forEach(x=>document.getElementById(x).hidden=x!==id)}
 function showForgotPassword(){showAuthForm('forgotForm')}
