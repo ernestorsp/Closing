@@ -151,4 +151,36 @@ input::placeholder,textarea::placeholder{color:#93a2aa}
 @media(max-width:720px){.homeMascot{grid-template-columns:112px minmax(0,1fr);gap:10px;padding:15px 40px 15px 8px}.mascotCharacter{width:110px;transform:scale(.82)}.mascotCharacter:hover{transform:scale(.82)}.mascotDialog{padding:14px}.mascotDialog p{font-size:14px}.mascotDialog::before{left:-8px}.homeMascot.minimized{width:122px}.homeMascot.minimized .mascotCharacter{transform:scale(.82)}}
 @media(prefers-reduced-motion:reduce){.mascotHead,.mascotEye,.mascotWaveArm{animation:none}}
 @media(max-width:720px){header{flex-wrap:wrap}header>div{margin-right:auto;min-width:0}.headerSync{min-width:44px;padding:9px}.syncLabel{display:none}.station{order:3;margin:0;width:100%;justify-content:space-between}nav{top:115px}.stats{grid-template-columns:1fr 1fr}.closingChecklist,.grid2,.photoGrid,.historyPhotos,.vanCountGrid,.closingFields,.adminGrid,.permissionSummary,.adminUserFields{grid-template-columns:1fr}.sectionTitle{align-items:stretch;flex-direction:column}.sectionTitle input{max-width:none}.card{align-items:flex-start}main{padding:14px}.photoPreview{height:210px}.rescueFields{grid-template-columns:1fr 1fr}.rescueFields label:first-child,.rescueNotes{grid-column:1/-1}.closingFields .wide{grid-column:auto}.notePhotoList{grid-template-columns:repeat(2,1fr)}.rescueFinal,.inspectionSkipPanel,.adminUserActions{align-items:stretch;flex-direction:column}.rescueFinal button,.inspectionSkipPanel button,.adminUserActions button{width:100%}}
+
+/* Closing Buddy notifications and Admin message center */
+.homeMascot[hidden]{display:none!important}
+.homeMascot{animation:mascotArrive .34s ease-out both;padding-right:20px}
+.mascotCharacter{cursor:default}
+.mascotCharacter:hover{transform:none}
+.mascotActions{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.mascotActions button{min-height:38px;padding:8px 13px;border-radius:9px;font-size:12px;font-weight:900;letter-spacing:.02em}
+.mascotAck{border:1px solid #16834a;background:#16834a;color:#fff;box-shadow:0 5px 12px #16834a25}
+.mascotAck:hover{background:#116c3d}
+.mascotAck span{display:inline-grid;place-items:center;width:20px;height:20px;margin-right:5px;border-radius:50%;background:#fff;color:#16834a}
+.mascotDismiss{border:1px solid #c9d8df;background:#f7fafb;color:var(--navy)}
+@keyframes mascotArrive{from{opacity:0;transform:translateY(10px) scale(.985)}to{opacity:1;transform:none}}
+.avatarAdminGrid{display:grid;grid-template-columns:minmax(300px,.85fr) minmax(360px,1.15fr);gap:18px;align-items:start}
+.avatarComposer{position:sticky;top:174px;overflow:hidden}
+.avatarComposerIcon{display:grid;place-items:center;width:48px;height:48px;margin-bottom:10px;border-radius:14px;background:#e8f5f6;font-size:24px}
+.avatarComposer h3{margin:0 0 14px;color:var(--navy)}
+.avatarComposer textarea{min-height:128px;resize:vertical}
+.avatarComposerFooter{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-top:14px}
+.avatarComposerFooter span{max-width:260px;color:var(--muted);font-size:12px;line-height:1.4}
+.avatarMessagePanel{min-height:320px}
+.avatarAdminMessages{display:grid;gap:11px}
+.avatarAdminCard{padding:15px;border:1px solid #d7e1e5;border-radius:12px;background:#fbfdfd}
+.avatarAdminCard>div,.avatarAdminCard footer{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.avatarAdminCard strong{color:var(--navy);font-size:13px}
+.avatarAdminCard p{margin:12px 0;color:#334d5a;line-height:1.48}
+.avatarAdminCard footer{padding-top:10px;border-top:1px solid #e6edef;color:var(--muted);font-size:12px}
+.avatarAdminCard footer b{color:#16834a}
+.avatarAudience{padding:4px 8px;border-radius:999px;background:#e8f5f6;color:var(--teal-dark);font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.05em}
+@media(max-width:820px){.avatarAdminGrid{grid-template-columns:1fr}.avatarComposer{position:static}}
+@media(max-width:720px){.homeMascot{padding-right:10px}.mascotActions button{width:100%}.avatarComposerFooter{align-items:stretch;flex-direction:column}.avatarComposerFooter button{width:100%}}
+
 </style>
