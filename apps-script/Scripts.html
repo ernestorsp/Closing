@@ -113,7 +113,7 @@ function startMascotSystem(){
  DATA.avatarMessages=Array.isArray(DATA.avatarMessages)?DATA.avatarMessages:[];
  setTimeout(()=>{if((DATA.avatarMessages||[]).length)showPendingAvatarMessage();else showMascotMessage({id:'welcome',text:'Hey '+String(DATA.user.name||'').split(' ')[0]+'! Closing Buddy is ready at '+DATA.user.station+'. I only pop up when I have something useful… or funny.',requiresAck:false,sender:'Closing Buddy',station:DATA.user.station})},900);
  MASCOT_TIMER=setInterval(()=>{if(document.visibilityState!=='hidden'&&!(DATA.avatarMessages||[]).length)showMascotMessage(pickMascotAutomaticMessage())},30*60*1000);
- MASCOT_POLL_TIMER=setInterval(pollAvatarMessages,60*1000);
+ MASCOT_POLL_TIMER=setInterval(pollAvatarMessages,15*1000);
 }
 function showMascotMessage(item){
  const box=document.getElementById('homeMascot');if(!box||!item)return;if(box.parentElement&&box.parentElement.id==='home')document.getElementById('app').appendChild(box);
@@ -123,7 +123,7 @@ function showMascotMessage(item){
  document.getElementById('mascotSender').textContent=item.requiresAck?(item.sender||'Admin'):'Closing Buddy';
  document.getElementById('mascotAck').hidden=!item.requiresAck;
  document.getElementById('mascotDismiss').hidden=!!item.requiresAck;
- box.hidden=false;box.classList.remove('mascotTalking','mascotSmokeOut');box.classList.add('mascotSmokeIn');createMascotSmoke(box);playMascotSound('in');void box.offsetWidth;box.classList.add('mascotTalking');setTimeout(()=>box.classList.remove('mascotSmokeIn'),700);
+ box.hidden=false;playMascotSound('in');box.classList.add('mascotTalking');setTimeout(()=>box.classList.remove('mascotTalking'),1100);
  if(!item.requiresAck)MASCOT_HIDE_TIMER=setTimeout(dismissMascot,22000);
 }
 function initMascotAudio(){
@@ -138,28 +138,23 @@ function playMascotSound(kind){
   const noise=ctx.createBufferSource(),filter=ctx.createBiquadFilter(),noiseGain=ctx.createGain();noise.buffer=buffer;filter.type='lowpass';filter.frequency.setValueAtTime(kind==='in'?1100:650,now);noiseGain.gain.setValueAtTime(kind==='in'?.32:.2,now);noiseGain.gain.exponentialRampToValueAtTime(.0001,now+(kind==='in'?.72:.46));noise.connect(filter);filter.connect(noiseGain);noiseGain.connect(master);noise.start(now);
  }catch(e){}
 }
-function createMascotSmoke(box){
- if(!box)return;box.querySelectorAll('.mascotSmokeCloud').forEach(x=>x.remove());const cloud=document.createElement('span');cloud.className='mascotSmokeCloud';cloud.setAttribute('aria-hidden','true');
- for(let i=0;i<11;i++){const puff=document.createElement('i');puff.style.setProperty('--puff',i);cloud.appendChild(puff)}box.appendChild(cloud);setTimeout(()=>cloud.remove(),900);
-}
-function hideMascotWithSmoke(force){
+function hideMascot(force){
  if(MASCOT_CURRENT&&MASCOT_CURRENT.requiresAck&&!force)return;
  clearTimeout(MASCOT_HIDE_TIMER);const box=document.getElementById('homeMascot');if(!box)return;
- createMascotSmoke(box);playMascotSound('out');box.classList.remove('mascotSmokeIn');box.classList.add('mascotSmokeOut');MASCOT_CURRENT=null;
- setTimeout(()=>{box.hidden=true;box.classList.remove('mascotSmokeOut')},560);
+ playMascotSound('out');box.hidden=true;box.classList.remove('mascotTalking');MASCOT_CURRENT=null;
 }
-function dismissMascot(){hideMascotWithSmoke(false)}
+function dismissMascot(){hideMascot(false)}
 function showPendingAvatarMessage(){
  const item=(DATA.avatarMessages||[])[0];if(!item)return;
  showMascotMessage({id:item.messageId,messageId:item.messageId,text:item.text,station:item.station||DATA.user.station,sender:item.createdByName||'Admin',requiresAck:true});
 }
 function pollAvatarMessages(){
  if(!TOKEN||!DATA.user)return;
- google.script.run.withSuccessHandler(r=>{DATA.avatarMessages=r.messages||[];if(DATA.avatarMessages.length&&(!MASCOT_CURRENT||!MASCOT_CURRENT.requiresAck))showPendingAvatarMessage()}).withFailureHandler(()=>{}).getAvatarMessages(TOKEN);
+ google.script.run.withSuccessHandler(r=>{DATA.avatarMessages=r.messages||[];if(MASCOT_CURRENT&&MASCOT_CURRENT.requiresAck&&!DATA.avatarMessages.some(x=>String(x.messageId)===String(MASCOT_CURRENT.messageId)))hideMascot(true);if(DATA.avatarMessages.length&&(!MASCOT_CURRENT||!MASCOT_CURRENT.requiresAck))showPendingAvatarMessage()}).withFailureHandler(()=>{}).getAvatarMessages(TOKEN);
 }
 function acknowledgeMascotMessage(){
  if(!MASCOT_CURRENT||!MASCOT_CURRENT.requiresAck)return;const id=MASCOT_CURRENT.messageId,button=document.getElementById('mascotAck');button.disabled=true;
- google.script.run.withSuccessHandler(r=>{button.disabled=false;DATA.avatarMessages=r.messages||[];hideMascotWithSmoke(true);toast('Message marked as read.');if(DATA.avatarMessages.length)setTimeout(showPendingAvatarMessage,700)}).withFailureHandler(e=>{button.disabled=false;toast(e.message||String(e),true)}).acknowledgeAvatarMessage(TOKEN,id);
+ google.script.run.withSuccessHandler(r=>{button.disabled=false;DATA.avatarMessages=r.messages||[];hideMascot(true);toast(r.claimed?'Message accepted. It will not appear to anyone else.':'Another user already accepted this message.');if(DATA.avatarMessages.length)setTimeout(showPendingAvatarMessage,700)}).withFailureHandler(e=>{button.disabled=false;toast(e.message||String(e),true)}).acknowledgeAvatarMessage(TOKEN,id);
 }
 function renderAccess(){document.querySelectorAll('[data-admin-only]').forEach(x=>x.hidden=!DATA.user.isAdmin);if(!DATA.user.isAdmin&&['history','update','avatar'].includes(document.querySelector('.page.active')?.id))showPage('home')}
 function renderStats(){const s=DATA.stats;document.getElementById('stats').innerHTML=[['Active vans',s.vans],['Pending',s.pending],['Completed',s.completed],['Issues',s.issues]].map(x=>'<div class="stat"><span>'+x[0]+'</span><b>'+x[1]+'</b></div>').join('')}
