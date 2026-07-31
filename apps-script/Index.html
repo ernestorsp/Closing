@@ -9,12 +9,11 @@
 <form id="passwordForm" class="panel login" hidden><h2>Change password</h2><label>Current password<input name="currentPassword" type="password" required></label><label>New password<input name="newPassword" type="password" minlength="6" required></label><button class="primary">Save password</button></form>
 </section>
 <div id="app" hidden><header><div><b>AAXI Closing</b><small id="userName"></small></div><label class="station">Working at<select id="station"><option>DJX3</option><option>DJX4</option></select></label><button id="syncButton" class="headerSync" onclick="manualSync()" title="Sync latest data" aria-label="Sync latest data"><span class="syncIcon">↻</span><span class="syncLabel">Sync</span></button><button class="ghost" onclick="doLogout()">Log out</button></header>
-<nav><button data-page="home" class="active">Home</button><button data-page="pending">Inspections</button><button data-page="rescues">Rescues</button><button data-page="closingData">Closing</button><button data-page="notes">Notes</button><button data-page="history" data-admin-only>History</button><button data-page="update" data-admin-only>Update</button></nav>
+<nav><button data-page="home" class="active">Home</button><button data-page="pending">Inspections</button><button data-page="rescues">Rescues</button><button data-page="closingData">Closing</button><button data-page="notes">Notes</button><button data-page="history" data-admin-only>History</button><button data-page="avatar" data-admin-only>Avatar</button><button data-page="update" data-admin-only>Update</button></nav>
 <main>
 <section id="home" class="page active"><div class="sectionTitle homeChecklistTitle"><h2>Closing checklist</h2></div><div id="closingChecklist" class="closingChecklist"></div>
-<div id="homeMascot" class="homeMascot" aria-live="polite">
-  <button type="button" class="mascotMinimize" onclick="toggleMascot()" aria-label="Minimize closing buddy">−</button>
-  <button type="button" class="mascotCharacter" onclick="nextMascotMessage()" aria-label="Show another reminder">
+<div id="homeMascot" class="homeMascot" aria-live="assertive" hidden>
+  <button type="button" class="mascotCharacter" aria-label="Closing Buddy is speaking">
     <span class="mascotWaveArm"></span>
     <span class="mascotBody"><span class="mascotVestLine"></span><span class="mascotSmileMark"></span></span>
     <span class="mascotHead">
@@ -27,13 +26,29 @@
     <span class="mascotLeg left"></span><span class="mascotLeg right"></span>
   </button>
   <div class="mascotDialog">
-    <div class="mascotDialogTop"><strong>Closing Buddy</strong><span id="mascotStation">DJX3</span></div>
+    <div class="mascotDialogTop"><strong id="mascotSender">Closing Buddy</strong><span id="mascotStation">DJX3</span></div>
     <p id="mascotMessage">Hey! I’m here to help with closing.</p>
-    <button type="button" onclick="nextMascotMessage()">Another reminder</button>
+    <div class="mascotActions">
+      <button id="mascotAck" type="button" class="mascotAck" onclick="acknowledgeMascotMessage()" hidden><span>✓</span> I READ IT</button>
+      <button id="mascotDismiss" type="button" class="mascotDismiss" onclick="dismissMascot()">Got it</button>
+    </div>
   </div>
 </div></section>
 <section id="pending" class="page"><div class="sectionTitle"><div><h2>Van inspections</h2><p id="pendingMeta"></p></div><input id="vanSearch" placeholder="Search van"></div><div id="inspectionSkipPanel" class="panel inspectionSkipPanel"><div><h3>Skip remaining inspections</h3><p id="inspectionSkipMeta">An Admin must approve before Inspections becomes Ready.</p></div><button id="inspectionSkipBtn" class="skipRequestBtn" onclick="requestInspectionSkipNow(this)">REQUEST SKIP</button></div><div id="vanList" class="cards"></div></section>
 <section id="history" class="page"><div class="sectionTitle"><h2>Van history</h2><input id="historySearch" placeholder="Search van"></div><div id="historyVans" class="cards"></div><div id="historyList" class="cards"></div></section>
+<section id="avatar" class="page" data-admin-only>
+<div class="sectionTitle"><div><h2>Avatar messages</h2><p>Send an important message through Closing Buddy. Users must confirm that they read it.</p></div></div>
+<div class="avatarAdminGrid">
+  <form class="panel avatarComposer" onsubmit="sendAvatarAdminMessage(event)">
+    <div class="avatarComposerIcon" aria-hidden="true">💬</div>
+    <h3>New team message</h3>
+    <label>Audience<select name="station"><option value="ALL">All stations</option><option value="DJX3">DJX3</option><option value="DJX4">DJX4</option></select></label>
+    <label>Message<textarea name="message" maxlength="500" rows="5" placeholder="Example: Before leaving, verify that every phone and battery pack is charging." required></textarea></label>
+    <div class="avatarComposerFooter"><span>Appears over the Home page until acknowledged.</span><button class="primary">SEND MESSAGE</button></div>
+  </form>
+  <div class="panel avatarMessagePanel"><div class="sectionTitle compact"><div><h3>Recent messages</h3><p>Read confirmations are counted automatically.</p></div><button type="button" class="ghost" onclick="loadAvatarAdminData(true)">Refresh</button></div><div id="avatarAdminMessages" class="avatarAdminMessages"><div class="historyLoading"><span class="spinner"></span> Loading messages…</div></div></div>
+</div>
+</section>
 <section id="update" class="page">
 <div class="sectionTitle"><div><h2>Admin update</h2><p>Update drivers, vans and application users.</p></div></div>
 <div class="adminGrid">
