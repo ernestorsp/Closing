@@ -274,7 +274,7 @@ function ensureAvatarSheets_(ss){
 }
 function avatarPendingMessages_(ss,email,station){
   ensureAvatarSheets_(ss);
-  const acknowledged=new Set(rowsTail_(ss.getSheetByName(APP.SHEETS.avatarAcks),2000).filter(x=>norm_(x.UserEmail)===norm_(email)).map(x=>String(x.MessageID)));
+  const acknowledged=new Set(rowsTail_(ss.getSheetByName(APP.SHEETS.avatarAcks),2000).map(x=>String(x.MessageID)));
   return rowsTail_(ss.getSheetByName(APP.SHEETS.avatarMessages),500)
     .filter(x=>yes_(x.Active)&&!acknowledged.has(String(x.MessageID))&&['ALL',String(station||'').toUpperCase()].includes(String(x.Station||'ALL').toUpperCase()))
     .sort((x,y)=>String(x.CreatedAt||'').localeCompare(String(y.CreatedAt||'')))
@@ -289,13 +289,14 @@ function acknowledgeAvatarMessage(token,messageId){
   if(!id)throw new Error('Message not found.');
   return lock_(()=>{
     ensureAvatarSheets_(ss);
-    const station=workingStation_(u),message=rowsTail_(ss.getSheetByName(APP.SHEETS.avatarMessages),500).find(x=>String(x.MessageID)===id&&yes_(x.Active));
-    if(!message)throw new Error('This message is no longer active.');
+    const station=workingStation_(u),message=rowsTail_(ss.getSheetByName(APP.SHEETS.avatarMessages),500).find(x=>String(x.MessageID)===id),prior=rowsTail_(ss.getSheetByName(APP.SHEETS.avatarAcks),2000).some(x=>String(x.MessageID)===id);
+    if(!message)throw new Error('Message not found.');
+    if(prior||!yes_(message.Active))return{ok:true,claimed:false,messages:avatarPendingMessages_(ss,s.email,station)};
     if(!['ALL',String(station).toUpperCase()].includes(String(message.Station||'ALL').toUpperCase()))throw new Error('This message is not assigned to your station.');
-    const prior=rowsTail_(ss.getSheetByName(APP.SHEETS.avatarAcks),2000).some(x=>String(x.MessageID)===id&&norm_(x.UserEmail)===s.email);
-    if(!prior)append_(ss.getSheetByName(APP.SHEETS.avatarAcks),{AckID:Utilities.getUuid(),MessageID:id,UserEmail:s.email,UserName:String(u.Name||''),AcknowledgedAt:new Date()});
+    append_(ss.getSheetByName(APP.SHEETS.avatarAcks),{AckID:Utilities.getUuid(),MessageID:id,UserEmail:s.email,UserName:String(u.Name||''),AcknowledgedAt:new Date()});
+    update_(ss.getSheetByName(APP.SHEETS.avatarMessages),'MessageID',id,{Active:false});
     audit_(s.email,'ACK_AVATAR_MESSAGE','AVATAR_MESSAGE',id,'Read and accepted');
-    return{ok:true,messages:avatarPendingMessages_(ss,s.email,station)};
+    return{ok:true,claimed:true,messages:avatarPendingMessages_(ss,s.email,station)};
   });
 }
 function sendAvatarMessage(token,input){
