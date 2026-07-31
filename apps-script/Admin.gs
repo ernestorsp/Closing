@@ -106,7 +106,7 @@ function acceptUserInvitation(rawToken,newPassword){
     update_(sh,'Email',invitation.Email,{Name:invitation.Name,Role:managedRole_(invitation.Role),DefaultStation:invitation.DefaultStation,StationAccess:invitation.StationAccess,Active:true,PasswordHash:hash_(salt+newPassword),Salt:salt,MustChange:false,UpdatedAt:now});
     update_(ss.getSheetByName('USER_INVITATIONS'),'InvitationID',invitation.InvitationID,{Status:'Accepted',AcceptedAt:now});
     audit_(invitation.Email,'ACCEPT_INVITATION','USER',invitation.Email,'');
-    return{ok:true,message:'Account activated. You can sign in now.'};
+    return{ok:true,email:norm_(invitation.Email),message:'Account activated. You can sign in now.'};
   });
 }
 function updateManagedUser(token,input){
