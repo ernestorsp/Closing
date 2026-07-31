@@ -26,14 +26,14 @@
 <section id="pending" class="page"><div class="sectionTitle"><div><h2>Van inspections</h2><p id="pendingMeta"></p></div><input id="vanSearch" placeholder="Search van"></div><div id="inspectionSkipPanel" class="panel inspectionSkipPanel"><div><h3>Skip remaining inspections</h3><p id="inspectionSkipMeta">An Admin must approve before Inspections becomes Ready.</p></div><button id="inspectionSkipBtn" class="skipRequestBtn" onclick="requestInspectionSkipNow(this)">REQUEST SKIP</button></div><div id="vanList" class="cards"></div></section>
 <section id="history" class="page"><div class="sectionTitle"><h2>Van history</h2><input id="historySearch" placeholder="Search van"></div><div id="historyVans" class="cards"></div><div id="historyList" class="cards"></div></section>
 <section id="avatar" class="page" data-admin-only>
-<div class="sectionTitle"><div><h2>Avatar messages</h2><p>Send an important message through Closing Buddy. The first user who confirms it closes it for everyone.</p></div></div>
+<div class="sectionTitle"><div><h2>Avatar messages</h2><p>Send an important message to a station or a specific user through Closing Buddy.</p></div></div>
 <div class="avatarAdminGrid">
   <form class="panel avatarComposer" onsubmit="sendAvatarAdminMessage(event)">
     <div class="avatarComposerIcon" aria-hidden="true">💬</div>
     <h3>New team message</h3>
-    <label>Audience<select name="station"><option value="ALL">All stations</option><option value="DJX3">DJX3</option><option value="DJX4">DJX4</option></select></label>
+    <label>Audience<select id="avatarAudience" name="audience"><optgroup label="Stations"><option value="station:ALL">All stations</option><option value="station:DJX3">DJX3</option><option value="station:DJX4">DJX4</option></optgroup><optgroup id="avatarUserOptions" label="Users"></optgroup></select></label>
     <label>Message<textarea name="message" maxlength="500" rows="5" placeholder="Example: Before leaving, verify that every phone and battery pack is charging." required></textarea></label>
-    <div class="avatarComposerFooter"><span>Appears until the first user confirms it, then disappears for everyone.</span><button class="primary">SEND MESSAGE</button></div>
+    <div class="avatarComposerFooter"><span>Stays visible until it is confirmed as read.</span><button class="primary">SEND MESSAGE</button></div>
   </form>
   <div class="panel avatarMessagePanel"><div class="sectionTitle compact"><div><h3>Recent messages</h3><p>Read confirmations are counted automatically.</p></div><button type="button" class="ghost" onclick="loadAvatarAdminData(true)">Refresh</button></div><div id="avatarAdminMessages" class="avatarAdminMessages"><div class="historyLoading"><span class="spinner"></span> Loading messages…</div></div></div>
 </div>
