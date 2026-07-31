@@ -206,4 +206,26 @@ input::placeholder,textarea::placeholder{color:#93a2aa}
 @media(max-width:720px){.homeMascot{grid-template-columns:122px minmax(0,1fr)}.mascotCharacter,.mascotImage{width:122px;height:145px;transform:none!important}}
 @media(prefers-reduced-motion:reduce){.mascotImage{animation:none!important}}
 
+/* Floating Closing Buddy: visible above every app page without an outer frame */
+.homeMascot{position:fixed;z-index:25;right:20px;bottom:18px;display:grid;grid-template-columns:150px minmax(250px,360px);align-items:end;gap:4px;width:auto;max-width:calc(100vw - 40px);margin:0;padding:0;overflow:visible;border:0;border-radius:0;background:transparent;box-shadow:none;pointer-events:none}
+.homeMascot::after{display:none}
+.homeMascot .mascotCharacter{width:150px;height:165px;pointer-events:none}
+.homeMascot .mascotImage{width:150px;height:165px;filter:drop-shadow(0 9px 9px #0d2d4540)}
+.homeMascot .mascotDialog{min-height:0;margin-bottom:12px;padding:14px 16px;border-color:#c3d4db;border-radius:14px;box-shadow:0 14px 38px #0b263b2b;pointer-events:auto}
+.homeMascot .mascotDialog p{min-height:0;margin:8px 0 10px}
+.homeMascot .mascotActions{gap:7px}
+
+/* Inspections uses the same clean card language and spacing as Home */
+#pending>.sectionTitle{margin-top:4px;padding:0 2px}
+#pending>.sectionTitle input{min-height:44px;border-color:var(--line);border-radius:12px;background:#fff;box-shadow:var(--shadow-sm)}
+#pending .inspectionSkipPanel{position:relative;overflow:hidden;min-height:82px;margin-bottom:14px;padding-left:19px;border-color:#ead8b7;border-radius:14px;background:#fffdf8;box-shadow:var(--shadow-sm)}
+#pending .inspectionSkipPanel::before{content:"";position:absolute;inset:0 auto 0 0;width:4px;background:#d39432}
+#pending #vanList{grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+#pending #vanList .card{position:relative;min-height:106px;padding:17px 16px 17px 19px;overflow:hidden}
+#pending #vanList .card::before{content:"";position:absolute;inset:0 auto 0 0;width:4px;background:var(--teal)}
+#pending #vanList .vanIcon{width:52px;height:52px;border-radius:50%;background:#edf7f7}
+#pending #vanList .cardActions{align-self:center}
+#pending #vanList .secondary{min-width:92px}
+@media(max-width:760px){.homeMascot{right:10px;bottom:10px;grid-template-columns:100px minmax(0,1fr);gap:0;max-width:calc(100vw - 20px)}.homeMascot .mascotCharacter,.homeMascot .mascotImage{width:100px;height:125px}.homeMascot .mascotDialog{margin-bottom:4px;padding:12px}.homeMascot .mascotDialogTop strong{font-size:14px}.homeMascot .mascotDialog p{font-size:13px}.homeMascot .mascotActions button{width:auto;min-height:34px;padding:7px 10px}#pending #vanList{grid-template-columns:1fr}}
+
 </style>
