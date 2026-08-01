@@ -1,0 +1,60 @@
+<script>
+(function(){
+  'use strict';
+  const STATE={lastKey:'',refreshing:false,appliedAt:0};
+  function ready(){return !!(window.AAXI_FIREBASE&&window.AAXI_FIREBASE.enabled()&&window.AAXI_FIREBASE.auth.currentUser&&window.AAXI_FIREBASE_INTEGRATION&&window.DATA&&DATA.user)}
+  function text(value){return value==null?'':String(value)}
+  function uiVan(row){return{
+    VanID:text(row.vanId||row.id),VanNumber:text(row.vanNumber||row.vanId||row.id),VanType:text(row.vanType),
+    HomeStation:text(row.homeStation),CurrentStation:text(row.currentStation),CurrentSpot:text(row.currentSpot),
+    CurrentStatus:text(row.currentStatus||'Operational'),Active:row.active!==false
+  }}
+  function uiInspection(row){return{
+    InspectionID:text(row.inspectionId||row.id),VanID:text(row.vanId),VanNumber:text(row.vanNumber),
+    UserEmail:text(row.ownerEmail),UserName:text(row.ownerName),WorkingStation:text(row.workingStation),
+    PreviousStation:text(row.previousStation),Station:text(row.station),PreviousSpot:text(row.previousSpot),Spot:text(row.spot),
+    PreviousStatus:text(row.previousStatus),Status:text(row.status||'Operational'),Notes:text(row.notes),
+    StartedAt:row.startedAt||'',CompletedAt:row.completedAt||'',InspectionState:row.state==='Completed'?'Completed':'In Progress'
+  }}
+  function recalc(){
+    const vans=(DATA.vans||[]).filter(v=>v.Active!==false),completed=new Set((DATA.completedVanIds||[]).map(String));
+    if(DATA.stats){DATA.stats.completed=completed.size;DATA.stats.pending=Math.max(0,vans.filter(v=>String(v.CurrentStation)===String(DATA.user.station)&&!completed.has(String(v.VanID))).length)}
+    if(DATA.checklist){
+      DATA.checklist.inspectionsTotal=vans.filter(v=>String(v.HomeStation||v.CurrentStation)===String(DATA.user.station)).length;
+      DATA.checklist.inspectionsCompleted=completed.size;
+      DATA.checklist.inspectionsReady=DATA.checklist.inspectionsTotal>0&&DATA.checklist.inspectionsCompleted>=DATA.checklist.inspectionsTotal;
+      DATA.checklist.allReady=!!DATA.checklist.inspectionsReady&&!!DATA.checklist.rescuesReady&&!!DATA.checklist.pickupReady&&!!DATA.checklist.returnedPackagesReady&&!!DATA.checklist.routesTomorrowReady;
+    }
+  }
+  function apply(result){
+    if(!result||!result.ok)return result;
+    DATA.vans=(result.vans||[]).map(uiVan);
+    DATA.completedToday=(result.completedToday||[]).map(uiInspection);
+    DATA.completedVanIds=DATA.completedToday.map(x=>String(x.VanID));
+    DATA.inProgress=(result.inProgress||[]).map(uiInspection);
+    BLOCKED_VANS=new Set((result.locks||[]).filter(x=>String(x.ownerUid)!==String(result.user&&result.user.uid)).map(x=>String(x.vanId||x.id)));
+    if(result.user){DATA.user.firebaseUid=result.user.uid;DATA.user.firebaseRole=result.user.role;DATA.user.migrationEnabled=result.user.migrationEnabled!==false}
+    recalc();STATE.appliedAt=Date.now();
+    try{saveAppCache(DATA)}catch(_error){}
+    if(typeof renderAll==='function')renderAll();
+    return result;
+  }
+  async function refresh(force){
+    if(!ready()||STATE.refreshing)return null;
+    const station=String(DATA.user.station||document.getElementById('station')?.value||'DJX3');
+    const key=station+'|'+String(window.AAXI_FIREBASE.auth.currentUser.uid);
+    if(!force&&STATE.lastKey===key&&Date.now()-STATE.appliedAt<30000)return null;
+    STATE.refreshing=true;
+    try{const result=await window.AAXI_FIREBASE_INTEGRATION.loadCloudBootstrap(station);STATE.lastKey=key;return apply(result)}
+    catch(error){console.error('[Firebase bootstrap]',error);return null}
+    finally{STATE.refreshing=false}
+  }
+  function bind(){
+    document.getElementById('station')?.addEventListener('change',()=>setTimeout(()=>refresh(true),50));
+    setInterval(()=>refresh(false),5000);
+    window.addEventListener('online',()=>refresh(true));
+  }
+  document.addEventListener('DOMContentLoaded',()=>{bind();setTimeout(()=>refresh(true),800)});
+  window.AAXI_FIREBASE_BOOTSTRAP={STATE,refresh,apply,enableAndRefresh:async(email,password)=>{window.AAXI_FIREBASE_INTEGRATION.setEnabled(true);await window.AAXI_FIREBASE_INTEGRATION.signInAlongsideCurrentLogin(email,password);return refresh(true)},disable:()=>window.AAXI_FIREBASE_INTEGRATION.setEnabled(false)};
+})();
+</script>
