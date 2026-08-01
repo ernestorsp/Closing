@@ -4,12 +4,19 @@
   function cloudReady(){return !!(window.AAXI_FIREBASE&&window.AAXI_FIREBASE.enabled()&&window.AAXI_FIREBASE.auth.currentUser)}
   function report(error){console.error('[Firebase inspections]',error)}
   function currentInspectionId(){return CURRENT&&CURRENT.inspection&&String(CURRENT.inspection.InspectionID||'')}
+  function toUiInspection(cloud){
+    const i=cloud.inspection||{};
+    return{
+      inspection:{InspectionID:String(i.inspectionId||i.id||''),VanID:String(i.vanId||''),VanNumber:String(i.vanNumber||''),UserEmail:String(i.ownerEmail||''),UserName:String(i.ownerName||''),WorkingStation:String(i.workingStation||i.station||''),PreviousStation:String(i.previousStation||i.station||''),Station:String(i.station||''),PreviousSpot:String(i.previousSpot||''),Spot:String(i.spot||''),PreviousStatus:String(i.previousStatus||i.status||'Operational'),Status:String(i.status||'Operational'),Notes:String(i.notes||''),StartedAt:i.startedAt||new Date().toISOString(),PhotoProgress:String((cloud.photos||[]).length)+'/6',InspectionState:i.state==='Completed'?'Completed':'In Progress'},
+      lastInspection:null,
+      photos:(cloud.photos||[]).map(p=>({PhotoID:p.id||p.photoId,Part:p.part,FileURL:p.url||'',CapturedAt:p.createdAt,DamageAssessment:p.assessment||'No Damage',DamageNotes:p.notes||''})),
+      damages:(cloud.damages||[]).map(d=>({DamageID:d.id||d.damageId,Part:d.part,Severity:d.severity,PhotoID:d.photoId||'',ReportedAt:d.createdAt})),
+      spots:[],requiredParts:['Front','Driver Side','Rear','Passenger Side','Cargo Interior','Cabin Interior'],statuses:['Operational','Downed','Grounded']
+    }
+  }
   function preserveAndRender(cloud){
-    const integration=window.AAXI_FIREBASE_INTEGRATION;
-    if(!integration||!integration.toUiInspection)return;
-    const draft=CURRENT&&CURRENT.locationDraft,last=CURRENT&&CURRENT.lastInspection,data=integration.toUiInspection(cloud);
-    data.locationDraft=draft||null;data.lastInspection=last||null;
-    renderInspection(data);
+    const draft=CURRENT&&CURRENT.locationDraft,last=CURRENT&&CURRENT.lastInspection,data=toUiInspection(cloud);
+    data.locationDraft=draft||null;data.lastInspection=last||null;renderInspection(data);
   }
   function wrapPhotos(){
     if(typeof window.capturePhoto!=='function'||window.capturePhoto._firebaseWrapped)return;
@@ -20,9 +27,9 @@
       PHOTO_UPLOADS.add(part);renderInspection(CURRENT);
       resizeImage(file,1280,.78,data=>claimCurrentInspection(async()=>{
         const inspectionId=currentInspectionId();if(!inspectionId){PHOTO_UPLOADS.delete(part);return}
-        const photoId=crypto.randomUUID(),name=photoId+'.jpg';
+        const photoId=crypto.randomUUID();
         try{
-          const uploaded=await window.AAXI_FIREBASE.uploadDataUrl(inspectionId,data,name,{part:String(part)});
+          const uploaded=await window.AAXI_FIREBASE.uploadDataUrl(inspectionId,data,photoId+'.jpg',{part:String(part)});
           await window.AAXI_FIREBASE.registerPhoto(inspectionId,{photoId,part,assessment:'No Damage',notes:'',storagePath:uploaded.path,contentType:uploaded.contentType,size:uploaded.size});
           const cloud=await window.AAXI_FIREBASE.getInspection(inspectionId);
           PHOTO_UPLOADS.delete(part);if(CURRENT&&currentInspectionId()===inspectionId)preserveAndRender(cloud);
@@ -78,11 +85,11 @@
     window.finishInspection._firebaseWrapped=true;
   }
   function stopCloudLock(){
-    const integration=window.AAXI_FIREBASE_INTEGRATION;if(!integration)return;
-    if(integration.stopHeartbeat)integration.stopHeartbeat();if(integration.STATE)integration.STATE.currentLock=null;
+    const integration=window.AAXI_FIREBASE_INTEGRATION,state=integration&&integration.STATE;if(!state)return;
+    if(state.heartbeat)clearInterval(state.heartbeat);state.heartbeat=null;state.currentLock=null;
   }
   function install(){wrapPhotos();wrapDamage();wrapFinish()}
   document.addEventListener('DOMContentLoaded',()=>setTimeout(install,20));
-  window.AAXI_FIREBASE_INSPECTION_OVERRIDES={install};
+  window.AAXI_FIREBASE_INSPECTION_OVERRIDES={install,toUiInspection};
 })();
 </script>
