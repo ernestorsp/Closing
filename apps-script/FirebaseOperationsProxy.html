@@ -1,0 +1,82 @@
+<script>
+(function(){
+  'use strict';
+  const STATE={installed:false,original:null};
+  function ready(){return !!(window.AAXI_FIREBASE&&window.AAXI_FIREBASE.enabled()&&window.AAXI_FIREBASE.auth.currentUser&&window.DATA&&DATA.user)}
+  function text(v){return v==null?'':String(v)}
+  function dateKey(){return text(DATA.today||new Date().toISOString().slice(0,10))}
+  function station(){return text(DATA.user&&DATA.user.station||document.getElementById('station')?.value||'DJX3')}
+  function driver(id){return (DATA.rescueDrivers||[]).find(x=>text(x.DriverID)===text(id))||null}
+  function uiInspection(row){return{
+    InspectionID:text(row.inspectionId||row.id),VanID:text(row.vanId),VanNumber:text(row.vanNumber),
+    UserEmail:text(row.ownerEmail),UserName:text(row.ownerName||row.completedByName),WorkingStation:text(row.workingStation),
+    PreviousStation:text(row.previousStation),Station:text(row.station),PreviousSpot:text(row.previousSpot),Spot:text(row.spot),
+    PreviousStatus:text(row.previousStatus),Status:text(row.status||'Operational'),Notes:text(row.notes),
+    StartedAt:row.startedAt||'',CompletedAt:row.completedAt||'',InspectionState:row.state==='Completed'?'Completed':'In Progress'
+  }}
+  async function saveRescues(args){
+    const payload=args[1]||{},daily=Array.isArray(payload.dailyDrivers)?payload.dailyDrivers:[],items=Array.isArray(payload.rescues)?payload.rescues:[];
+    const rescueDrivers=daily.map(x=>driver(x.driverId)?.Driver||'').filter(Boolean);
+    const rescues=items.map((x,index)=>({
+      id:text(x.id||x.rescueId||('rescue_'+(index+1))),
+      driver:driver(x.rescuerDriverId)?.Driver||text(x.rescuerDriver||''),
+      recipientDriver:driver(x.recipientDriverId)?.Driver||text(x.recipientDriver||''),
+      recipientDriverId:text(x.recipientDriverId),stops:Number(x.stops||0),packages:Number(x.packages||0),
+      affects:text(x.affects).toLowerCase()==='yes',notes:text(x.notes)
+    }));
+    const result=await window.AAXI_FIREBASE.saveRescues({station:station(),date:dateKey(),rescueDrivers,rescues});
+    DATA.rescueFinalized=true;
+    if(DATA.checklist){DATA.checklist.rescuesReady=true;DATA.checklist.allReady=!!DATA.checklist.inspectionsReady&&!!DATA.checklist.rescuesReady&&!!DATA.checklist.pickupReady&&!!DATA.checklist.returnedPackagesReady&&!!DATA.checklist.routesTomorrowReady}
+    return{ok:true,count:rescues.length,sheet:'Firestore · '+station(),message:rescues.length?rescues.length+' rescues saved.':'No rescues today. '+station()+' was closed successfully.',cloud:result};
+  }
+  async function saveClosing(args){
+    const input=args[1]||{},pickup=text(input.pickupAll);
+    const late=(Array.isArray(input.lateDriverIds)?input.lateDriverIds:[]).map(id=>driver(id)?.Driver||'').filter(Boolean);
+    const dvic=(Array.isArray(input.dvicDriverIds)?input.dvicDriverIds:[]).map(id=>driver(id)?.Driver||'').filter(Boolean);
+    const body={station:station(),date:text(input.date||dateKey()),routesForTomorrow:Number(input.routesTomorrow||0),pickupComplete:pickup==='Yes',pickupComment:text(input.pickupComment),phones:Number(input.phones||0),batteryPacks:Number(input.batteryPacks||0),driversWithReceipts:Number(input.driversWithReceipts||0),returnedPackages:Number(input.returnedPackages||0),lateRtsDrivers:late,dvicDrivers:dvic};
+    const result=await window.AAXI_FIREBASE.saveClosing(body),row=result.closingDay||body;
+    const record={RecordKey:body.date+'_'+body.station,RecordDate:body.date,Station:body.station,RoutesTomorrow:body.routesForTomorrow,PickupAll:body.pickupComplete?'Yes':'No',PickupComment:body.pickupComment,Phones:body.phones,BatteryPacks:body.batteryPacks,DriversWithReceipts:body.driversWithReceipts,ReturnedPackages:body.returnedPackages,LateRTSDrivers:late.join(' | '),DVICDrivers:dvic.join(' | '),SavedAt:row.savedAt||new Date().toISOString()};
+    DATA.closingData=record;
+    if(DATA.checklist){DATA.checklist.pickupReady=true;DATA.checklist.returnedPackagesReady=true;DATA.checklist.routesTomorrowReady=true;DATA.checklist.allReady=!!DATA.checklist.inspectionsReady&&!!DATA.checklist.rescuesReady}
+    return{ok:true,record,vanCounts:DATA.vanCounts||{},message:'Closing data saved for '+body.station+'.'};
+  }
+  async function history(args){
+    const result=await window.AAXI_FIREBASE.history(args[1],50);
+    return(result.inspections||[]).map(uiInspection);
+  }
+  async function inspectionDetails(args){
+    const cloud=await window.AAXI_FIREBASE.getInspection(args[1]),i=cloud.inspection||{};
+    const photos=await Promise.all((cloud.photos||[]).map(async p=>({PhotoID:text(p.id||p.photoId),Part:text(p.part),FileURL:p.url||await window.AAXI_FIREBASE.storageUrl(p.storagePath).catch(()=>''),CapturedAt:p.createdAt||'',DamageAssessment:text(p.assessment),DamageNotes:text(p.notes)})));
+    return{inspection:uiInspection(i),photos,damages:(cloud.damages||[]).map(d=>({DamageID:text(d.id||d.damageId),Part:text(d.part),Severity:text(d.severity),PhotoID:text(d.photoId),ReportedAt:d.createdAt||''})),requiredParts:['Front','Driver Side','Rear','Passenger Side','Cargo Interior','Cabin Interior']};
+  }
+  const ROUTES={saveDailyRescuesBatch:saveRescues,saveDailyClosing:saveClosing,getVanHistory:history,getCompletedInspection:inspectionDetails};
+  function originalCall(name,args,state){
+    let run=STATE.original;
+    if(state.success)run=run.withSuccessHandler(state.success);
+    if(state.failure)run=run.withFailureHandler(state.failure);
+    if(state.userObject&&run.withUserObject)run=run.withUserObject(state.userObject);
+    return run[name](...args);
+  }
+  function chain(state){
+    let proxy;
+    proxy=new Proxy({}, {get(_target,name){
+      if(name==='withSuccessHandler')return fn=>{state.success=fn;return proxy};
+      if(name==='withFailureHandler')return fn=>{state.failure=fn;return proxy};
+      if(name==='withUserObject')return obj=>{state.userObject=obj;return proxy};
+      return(...args)=>{
+        if(!ready()||!ROUTES[name])return originalCall(name,args,state);
+        Promise.resolve().then(()=>ROUTES[name](args)).then(value=>state.success&&state.success(value,state.userObject)).catch(error=>state.failure?state.failure(error,state.userObject):console.error('[Firebase operations]',error));
+      };
+    }});
+    return proxy;
+  }
+  function install(){
+    if(STATE.installed||!window.google||!google.script||!google.script.run)return false;
+    STATE.original=google.script.run;
+    Object.defineProperty(google.script,'run',{configurable:true,get(){return chain({success:null,failure:null,userObject:null})}});
+    STATE.installed=true;return true;
+  }
+  document.addEventListener('DOMContentLoaded',()=>{if(!install())setInterval(install,500)});
+  window.AAXI_FIREBASE_OPERATIONS_PROXY={STATE,install};
+})();
+</script>
