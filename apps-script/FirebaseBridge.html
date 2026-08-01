@@ -21,7 +21,7 @@
 
   function enabled(){return localStorage.getItem(ENABLE_KEY)==='true'}
   function setEnabled(value){localStorage.setItem(ENABLE_KEY,value?'true':'false');return enabled()}
-  async function idToken(){const user=auth.currentUser;if(!user)throw new Error('Firebase sign-in is required.');return user.getIdToken()}
+  async function idToken(){const user=auth.currentUser;if(!user)throw Object.assign(new Error('Firebase sign-in is required.'),{code:'UNAUTHENTICATED'});return user.getIdToken()}
   async function request(path,options){
     options=options||{};
     const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),options.timeout||20000);
@@ -33,17 +33,30 @@
         body:options.body?JSON.stringify(options.body):undefined
       });
       const data=response.status===204?null:await response.json().catch(()=>null);
-      if(!response.ok||data&&data.ok===false){const error=new Error(data&&data.error&&data.error.message||'Cloud request failed.');error.code=data&&data.error&&data.error.code||'HTTP_ERROR';error.status=response.status;throw error}
+      if(!response.ok||data&&data.ok===false){const error=new Error(data&&data.error&&data.error.message||'Cloud request failed.');error.code=data&&data.error&&data.error.code||'HTTP_ERROR';error.status=response.status;error.details=data&&data.error&&data.error.details||null;throw error}
       return data;
+    }catch(error){
+      if(error&&error.name==='AbortError')throw Object.assign(new Error('Cloud request timed out.'),{code:'TIMEOUT'});
+      throw error;
     }finally{clearTimeout(timer)}
   }
   async function signIn(email,password){return (await auth.signInWithEmailAndPassword(email,password)).user}
   async function signOut(){return auth.signOut()}
   async function bootstrap(station){return request('/v1/bootstrap'+(station?'?station='+encodeURIComponent(station):''))}
+  async function spots(station,vanId){const q=new URLSearchParams({station:String(station||'')});if(vanId)q.set('vanId',String(vanId));return request('/v1/spots?'+q.toString())}
+  async function getInspection(inspectionId){return request('/v1/inspections/'+encodeURIComponent(inspectionId))}
   async function claim(vanId,inspectionId){return request('/v1/inspection-locks/claim',{method:'POST',body:{vanId:String(vanId),inspectionId:String(inspectionId)}})}
   async function renew(vanId,inspectionId){return request('/v1/inspection-locks/renew',{method:'POST',body:{vanId:String(vanId),inspectionId:String(inspectionId)}})}
   async function release(vanId){return request('/v1/inspection-locks/'+encodeURIComponent(vanId),{method:'DELETE'})}
   async function finish(payload){return request('/v1/inspections/finish',{method:'POST',timeout:30000,body:payload})}
+  async function registerPhoto(inspectionId,payload){return request('/v1/inspections/'+encodeURIComponent(inspectionId)+'/photos',{method:'POST',body:payload})}
+  async function registerDamage(inspectionId,payload){return request('/v1/inspections/'+encodeURIComponent(inspectionId)+'/damages',{method:'POST',body:payload})}
+  function dataUrlToFile(dataUrl,fileName){
+    const parts=String(dataUrl||'').split(','),match=parts[0]&&parts[0].match(/^data:([^;]+);base64$/);
+    if(!match)throw new Error('Invalid image data.');
+    const binary=atob(parts[1]||''),bytes=new Uint8Array(binary.length);for(let i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);
+    return new File([bytes],fileName||'photo.jpg',{type:match[1]});
+  }
   async function uploadPhoto(inspectionId,file,fileName,metadata){
     if(!file||!String(file.type||'').startsWith('image/'))throw new Error('Only image files are allowed.');
     if(file.size>8*1024*1024)throw new Error('Photo is larger than 8 MB.');
@@ -52,6 +65,7 @@
     const reference=storage.ref(path),snapshot=await reference.put(file,{contentType:file.type,customMetadata:{inspectionId:String(inspectionId),uploadedBy:auth.currentUser&&auth.currentUser.uid||'',...(metadata||{})}});
     return{path,url:await snapshot.ref.getDownloadURL(),size:snapshot.totalBytes,contentType:file.type};
   }
-  window.AAXI_FIREBASE={app,auth,storage,enabled,setEnabled,signIn,signOut,bootstrap,claim,renew,release,finish,uploadPhoto,request,onAuthChanged:callback=>auth.onAuthStateChanged(callback)};
+  async function uploadDataUrl(inspectionId,dataUrl,fileName,metadata){return uploadPhoto(inspectionId,dataUrlToFile(dataUrl,fileName),fileName,metadata)}
+  window.AAXI_FIREBASE={app,auth,storage,enabled,setEnabled,signIn,signOut,bootstrap,spots,getInspection,claim,renew,release,finish,registerPhoto,registerDamage,uploadPhoto,uploadDataUrl,request,onAuthChanged:callback=>auth.onAuthStateChanged(callback)};
 })();
 </script>
