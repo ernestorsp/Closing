@@ -45,14 +45,27 @@ export class ClosingApiClient {
       }
       return payload;
     } catch (error) {
-      if (error?.name === 'AbortError') {
-        throw new ClosingApiError('The request timed out.', { code: 'TIMEOUT' });
-      }
+      if (error?.name === 'AbortError') throw new ClosingApiError('The request timed out.', { code: 'TIMEOUT' });
       if (error instanceof ClosingApiError) throw error;
       throw new ClosingApiError(error?.message || 'Network request failed.', { code: 'NETWORK_ERROR' });
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  bootstrap(station) {
+    const query = station ? `?station=${encodeURIComponent(station)}` : '';
+    return this.request(`/v1/bootstrap${query}`);
+  }
+
+  getAvailableSpots(station, vanId = '') {
+    const query = new URLSearchParams({ station });
+    if (vanId) query.set('vanId', vanId);
+    return this.request(`/v1/spots?${query.toString()}`);
+  }
+
+  getInspection(inspectionId) {
+    return this.request(`/v1/inspections/${encodeURIComponent(inspectionId)}`);
   }
 
   claimInspection({ vanId, inspectionId }) {
@@ -69,6 +82,20 @@ export class ClosingApiClient {
 
   releaseInspection(vanId) {
     return this.request(`/v1/inspection-locks/${encodeURIComponent(vanId)}`, { method: 'DELETE' });
+  }
+
+  registerPhoto(inspectionId, payload) {
+    return this.request(`/v1/inspections/${encodeURIComponent(inspectionId)}/photos`, {
+      method: 'POST', body: payload,
+      idempotencyKey: `photo:${inspectionId}:${payload.photoId || payload.part || payload.storagePath}`
+    });
+  }
+
+  registerDamage(inspectionId, payload) {
+    return this.request(`/v1/inspections/${encodeURIComponent(inspectionId)}/damages`, {
+      method: 'POST', body: payload,
+      idempotencyKey: `damage:${inspectionId}:${payload.damageId || payload.storagePath || payload.part}`
+    });
   }
 
   finishInspection(payload) {
