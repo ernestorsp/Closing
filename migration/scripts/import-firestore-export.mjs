@@ -17,8 +17,11 @@ if (payload.version !== 1) throw new Error(`Unsupported export version: ${payloa
 
 const stats = { vans: 0, spots: 0, inspections: 0, users: 0, skipped: 0 };
 const clean = value => String(value ?? '').trim();
+const key = value => clean(value).toLowerCase().replace(/[^a-z0-9]/g, '');
 const get = (row, names) => {
   for (const name of names) if (clean(row[name])) return clean(row[name]);
+  const normalized = new Map(Object.entries(row).map(([name, value]) => [key(name), value]));
+  for (const name of names) if (clean(normalized.get(key(name)))) return clean(normalized.get(key(name)));
   return '';
 };
 const bool = value => ['true', 'yes', '1', 'active'].includes(clean(value).toLowerCase());
@@ -32,7 +35,6 @@ async function flush() {
   batch = db.batch();
   pending = 0;
 }
-
 async function set(ref, value, options = { merge: true }) {
   if (!dryRun) batch.set(ref, value, options);
   pending += 1;
@@ -44,11 +46,13 @@ for (const row of payload.vans || []) {
   if (!vanId) { stats.skipped += 1; continue; }
   await set(db.collection('vans').doc(vanId), {
     vanId,
-    vanNumber: get(row, ['vanNumber', 'VanNumber', 'van', 'Van']),
+    vanNumber: get(row, ['vanNumber', 'VanNumber', 'van', 'Van']) || vanId,
     vanType: get(row, ['vanType', 'VanType', 'type', 'Type']),
+    homeStation: get(row, ['homeStation', 'HomeStation']),
     currentStation: get(row, ['currentStation', 'CurrentStation', 'station', 'Station']),
     currentSpot: get(row, ['currentSpot', 'CurrentSpot', 'spot', 'Spot']),
     currentStatus: get(row, ['currentStatus', 'CurrentStatus', 'status', 'Status']) || 'Operational',
+    active: !['false', 'no', '0', 'inactive'].includes(get(row, ['active', 'Active']).toLowerCase()),
     migration: { sourceSheet: row._sourceSheet || '', sourceRow: row._sourceRow || 0 },
     migratedAt: FieldValue.serverTimestamp()
   });
@@ -60,8 +64,10 @@ for (const row of payload.spots || []) {
   const spot = get(row, ['spot', 'Spot', 'spotNumber', 'SpotNumber']);
   if (!station || !spot) { stats.skipped += 1; continue; }
   await set(db.collection('spots').doc(`${station}_${spot}`), {
-    station, spot,
-    vanId: get(row, ['vanId', 'VanID']),
+    station,
+    spot,
+    vanId: get(row, ['vanId', 'VanID', 'occupiedByVanId', 'OccupiedByVanID']) || null,
+    active: !['false', 'no', '0', 'inactive'].includes(get(row, ['active', 'Active']).toLowerCase()),
     migration: { sourceSheet: row._sourceSheet || '', sourceRow: row._sourceRow || 0 },
     migratedAt: FieldValue.serverTimestamp()
   });
@@ -73,7 +79,8 @@ for (const row of payload.inspections || []) {
   const vanId = get(row, ['vanId', 'VanID']);
   if (!inspectionId || !vanId) { stats.skipped += 1; continue; }
   await set(db.collection('inspections').doc(inspectionId), {
-    inspectionId, vanId,
+    inspectionId,
+    vanId,
     station: get(row, ['station', 'Station']),
     spot: get(row, ['spot', 'Spot']),
     status: get(row, ['status', 'Status']) || 'Operational',
@@ -93,7 +100,7 @@ for (const row of payload.users || []) {
     email: get(row, ['email', 'Email']),
     displayName: get(row, ['displayName', 'DisplayName', 'name', 'Name']),
     role: get(row, ['role', 'Role']).toLowerCase() === 'admin' ? 'admin' : 'lead',
-    station: get(row, ['station', 'Station']) || 'DJX3',
+    station: get(row, ['station', 'Station', 'defaultStation', 'DefaultStation']) || 'DJX3',
     active: bool(get(row, ['active', 'Active', 'status', 'Status'])),
     migration: { sourceSheet: row._sourceSheet || '', sourceRow: row._sourceRow || 0 },
     migratedAt: FieldValue.serverTimestamp()
