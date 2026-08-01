@@ -58,13 +58,80 @@ function cleanId(value, field) {
   return id;
 }
 
+function cleanStation(value) {
+  const station = cleanId(value, 'station').toUpperCase();
+  if (!['DJX3', 'DJX4', 'SHOP'].includes(station)) throw httpError(400, 'INVALID_STATION', 'Station must be DJX3, DJX4 or SHOP.');
+  return station;
+}
+
 function nowIso() { return new Date().toISOString(); }
 function lockExpired(data, nowMs) {
   const expires = data?.expiresAt?.toMillis?.() ?? 0;
   return expires <= nowMs;
 }
+function serialize(value) {
+  if (value == null) return value;
+  if (typeof value?.toDate === 'function') return value.toDate().toISOString();
+  if (Array.isArray(value)) return value.map(serialize);
+  if (typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, serialize(child)]));
+  return value;
+}
+function docData(doc) { return { id: doc.id, ...serialize(doc.data()) }; }
 
 app.get('/healthz', (_req, res) => res.json({ ok: true, service: 'aaxi-closing-api', time: nowIso() }));
+
+app.get('/v1/bootstrap', requireAuth, async (req, res, next) => {
+  try {
+    const station = cleanStation(req.query.station || req.profile.station || 'DJX3');
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const [vansSnap, spotsSnap, locksSnap, completedSnap, inProgressSnap] = await Promise.all([
+      db.collection('vans').where('currentStation', 'in', station === 'SHOP' ? ['SHOP'] : [station, 'SHOP']).limit(500).get(),
+      station === 'SHOP' ? Promise.resolve(null) : db.collection('spots').where('station', '==', station).limit(500).get(),
+      db.collection('inspectionLocks').limit(500).get(),
+      db.collection('inspections').where('station', '==', station).where('completedAt', '>=', Timestamp.fromDate(today)).orderBy('completedAt', 'desc').limit(250).get(),
+      db.collection('inspections').where('ownerUid', '==', req.user.uid).where('state', '==', 'InProgress').limit(25).get()
+    ]);
+    const liveLocks = locksSnap.docs.filter(doc => !lockExpired(doc.data(), Date.now())).map(docData);
+    res.json({
+      ok: true,
+      user: { uid: req.user.uid, email: req.user.email || '', ...serialize(req.profile) },
+      station,
+      vans: vansSnap.docs.map(docData),
+      spots: spotsSnap ? spotsSnap.docs.map(docData) : [],
+      locks: liveLocks,
+      completedToday: completedSnap.docs.map(docData),
+      inProgress: inProgressSnap.docs.map(docData),
+      serverTime: nowIso()
+    });
+  } catch (error) { next(error); }
+});
+
+app.get('/v1/spots', requireAuth, async (req, res, next) => {
+  try {
+    const station = cleanStation(req.query.station || req.profile.station || 'DJX3');
+    if (station === 'SHOP') return res.json({ ok: true, station, spots: [] });
+    const vanId = String(req.query.vanId || '').trim();
+    const snap = await db.collection('spots').where('station', '==', station).limit(500).get();
+    const spots = snap.docs.map(docData).filter(spot => !spot.vanId || String(spot.vanId) === vanId);
+    spots.sort((a, b) => String(a.spot || a.id).localeCompare(String(b.spot || b.id), undefined, { numeric: true }));
+    res.json({ ok: true, station, spots });
+  } catch (error) { next(error); }
+});
+
+app.get('/v1/inspections/:inspectionId', requireAuth, async (req, res, next) => {
+  try {
+    const inspectionId = cleanId(req.params.inspectionId, 'inspectionId');
+    const inspectionRef = db.collection('inspections').doc(inspectionId);
+    const [inspection, photos, damages] = await Promise.all([
+      inspectionRef.get(),
+      inspectionRef.collection('photos').orderBy('createdAt', 'asc').limit(50).get(),
+      inspectionRef.collection('damages').orderBy('createdAt', 'asc').limit(50).get()
+    ]);
+    if (!inspection.exists) throw httpError(404, 'INSPECTION_NOT_FOUND', 'Inspection was not found.');
+    res.json({ ok: true, inspection: docData(inspection), photos: photos.docs.map(docData), damages: damages.docs.map(docData) });
+  } catch (error) { next(error); }
+});
 
 app.post('/v1/inspection-locks/claim', requireAuth, async (req, res, next) => {
   try {
@@ -72,32 +139,37 @@ app.post('/v1/inspection-locks/claim', requireAuth, async (req, res, next) => {
     const inspectionId = cleanId(req.body?.inspectionId, 'inspectionId');
     const lockRef = db.collection('inspectionLocks').doc(vanId);
     const inspectionRef = db.collection('inspections').doc(inspectionId);
+    const vanRef = db.collection('vans').doc(vanId);
     const nowMs = Date.now();
     const result = await db.runTransaction(async tx => {
-      const [lockSnap, inspectionSnap] = await Promise.all([tx.get(lockRef), tx.get(inspectionRef)]);
+      const [lockSnap, inspectionSnap, vanSnap] = await Promise.all([tx.get(lockRef), tx.get(inspectionRef), tx.get(vanRef)]);
+      if (!vanSnap.exists) throw httpError(404, 'VAN_NOT_FOUND', 'Van was not found.');
       if (lockSnap.exists) {
         const current = lockSnap.data();
         const owned = current.ownerUid === req.user.uid && current.inspectionId === inspectionId;
         if (!owned && !lockExpired(current, nowMs)) {
           throw httpError(409, 'VAN_LOCKED', 'This van is being inspected by another user.', {
-            expiresAt: current.expiresAt?.toDate?.().toISOString?.() || null
+            ownerName: current.ownerName || '', expiresAt: current.expiresAt?.toDate?.().toISOString?.() || null
           });
         }
       }
       const expiresAt = Timestamp.fromMillis(nowMs + LOCK_TTL_MS);
+      const van = vanSnap.data();
       tx.set(lockRef, {
         vanId, inspectionId, ownerUid: req.user.uid,
         ownerName: req.profile.displayName || req.user.name || req.user.email || '',
         station: req.profile.station || '', acquiredAt: FieldValue.serverTimestamp(), expiresAt
       });
       tx.set(inspectionRef, {
-        inspectionId, vanId, ownerUid: req.user.uid,
+        inspectionId, vanId, vanNumber: van.vanNumber || '', ownerUid: req.user.uid,
         ownerName: req.profile.displayName || req.user.name || req.user.email || '',
-        workingStation: req.profile.station || '', state: 'InProgress',
+        workingStation: req.profile.station || '', station: van.currentStation || req.profile.station || '',
+        spot: van.currentSpot || '', previousStation: van.currentStation || '', previousSpot: van.currentSpot || '',
+        previousStatus: van.currentStatus || 'Operational', status: van.currentStatus || 'Operational', state: 'InProgress',
         startedAt: inspectionSnap.exists ? inspectionSnap.get('startedAt') : FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp()
       }, { merge: true });
-      return { expiresAt: expiresAt.toDate().toISOString() };
+      return { expiresAt: expiresAt.toDate().toISOString(), van: serialize(van) };
     });
     res.status(200).json({ ok: true, vanId, inspectionId, ...result });
   } catch (error) { next(error); }
@@ -120,11 +192,63 @@ app.post('/v1/inspection-locks/renew', requireAuth, async (req, res, next) => {
   } catch (error) { next(error); }
 });
 
+app.post('/v1/inspections/:inspectionId/photos', requireAuth, async (req, res, next) => {
+  try {
+    const inspectionId = cleanId(req.params.inspectionId, 'inspectionId');
+    const photoId = cleanId(req.body?.photoId || req.body?.part || crypto.randomUUID(), 'photoId');
+    const inspectionRef = db.collection('inspections').doc(inspectionId);
+    const inspection = await inspectionRef.get();
+    if (!inspection.exists) throw httpError(404, 'INSPECTION_NOT_FOUND', 'Inspection was not found.');
+    if (inspection.get('ownerUid') !== req.user.uid && req.profile.role !== 'admin') throw httpError(403, 'INSPECTION_NOT_OWNED', 'Cannot attach a photo to another user’s inspection.');
+    const storagePath = String(req.body?.storagePath || '').trim();
+    if (!storagePath.startsWith(`inspection-photos/${inspectionId}/`)) throw httpError(400, 'INVALID_STORAGE_PATH', 'Photo path does not belong to this inspection.');
+    const data = {
+      photoId,
+      part: String(req.body?.part || '').slice(0, 80),
+      assessment: String(req.body?.assessment || '').slice(0, 80),
+      notes: String(req.body?.notes || '').slice(0, 1000),
+      storagePath,
+      contentType: String(req.body?.contentType || 'image/jpeg').slice(0, 100),
+      size: Math.max(0, Number(req.body?.size || 0)),
+      uploadedByUid: req.user.uid,
+      uploadedByName: req.profile.displayName || req.user.name || req.user.email || '',
+      createdAt: FieldValue.serverTimestamp()
+    };
+    await inspectionRef.collection('photos').doc(photoId).set(data, { merge: true });
+    res.status(201).json({ ok: true, photo: { ...serialize(data), id: photoId } });
+  } catch (error) { next(error); }
+});
+
+app.post('/v1/inspections/:inspectionId/damages', requireAuth, async (req, res, next) => {
+  try {
+    const inspectionId = cleanId(req.params.inspectionId, 'inspectionId');
+    const damageId = cleanId(req.body?.damageId || crypto.randomUUID(), 'damageId');
+    const inspectionRef = db.collection('inspections').doc(inspectionId);
+    const inspection = await inspectionRef.get();
+    if (!inspection.exists) throw httpError(404, 'INSPECTION_NOT_FOUND', 'Inspection was not found.');
+    if (inspection.get('ownerUid') !== req.user.uid && req.profile.role !== 'admin') throw httpError(403, 'INSPECTION_NOT_OWNED', 'Cannot report damage on another user’s inspection.');
+    const storagePath = String(req.body?.storagePath || '').trim();
+    if (storagePath && !storagePath.startsWith(`inspection-photos/${inspectionId}/`)) throw httpError(400, 'INVALID_STORAGE_PATH', 'Damage photo path does not belong to this inspection.');
+    const data = {
+      damageId,
+      part: String(req.body?.part || 'Other').slice(0, 100),
+      severity: ['Low', 'Medium', 'High', 'Critical'].includes(req.body?.severity) ? req.body.severity : 'Low',
+      notes: String(req.body?.notes || '').slice(0, 2000),
+      storagePath,
+      reportedByUid: req.user.uid,
+      reportedByName: req.profile.displayName || req.user.name || req.user.email || '',
+      createdAt: FieldValue.serverTimestamp()
+    };
+    await inspectionRef.collection('damages').doc(damageId).set(data, { merge: true });
+    res.status(201).json({ ok: true, damage: { ...serialize(data), id: damageId } });
+  } catch (error) { next(error); }
+});
+
 app.post('/v1/inspections/finish', requireAuth, async (req, res, next) => {
   try {
     const inspectionId = cleanId(req.body?.inspectionId, 'inspectionId');
     const vanId = cleanId(req.body?.vanId, 'vanId');
-    const station = cleanId(req.body?.station, 'station');
+    const station = cleanStation(req.body?.station);
     const spot = station === 'SHOP' ? '' : cleanId(req.body?.spot, 'spot');
     const status = ['Operational', 'Downed', 'Grounded'].includes(req.body?.status) ? req.body.status : 'Operational';
     const lockRef = db.collection('inspectionLocks').doc(vanId);
@@ -144,7 +268,7 @@ app.post('/v1/inspections/finish', requireAuth, async (req, res, next) => {
         throw httpError(409, 'LOCK_EXPIRED', 'Inspection lock expired. Reopen the van and try again.');
       }
       if (inspection.exists && inspection.get('state') === 'Completed') {
-        return { alreadyCompleted: true, inspection: inspection.data() };
+        return { alreadyCompleted: true, inspection: serialize(inspection.data()), van: van.exists ? serialize(van.data()) : null };
       }
       const previousStation = van.exists ? String(van.get('currentStation') || '') : '';
       const previousSpot = van.exists ? String(van.get('currentSpot') || '') : '';
@@ -169,19 +293,18 @@ app.post('/v1/inspections/finish', requireAuth, async (req, res, next) => {
         damageFound: req.body?.damageFound === true,
         state: 'Completed', completedByUid: req.user.uid,
         completedByName: req.profile.displayName || req.user.name || req.user.email || '',
-        completedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
-        syncState: 'Pending'
+        completedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(), syncState: 'Pending'
+      };
+      const updatedVan = {
+        vanId, currentStation: station, currentSpot: spot, currentStatus: status,
+        lastInspectionId: inspectionId, lastInspectedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp()
       };
       tx.set(inspectionRef, completed, { merge: true });
-      tx.set(vanRef, {
-        vanId, currentStation: station, currentSpot: spot, currentStatus: status,
-        lastInspectionId: inspectionId, lastInspectedAt: FieldValue.serverTimestamp(),
-        updatedAt: FieldValue.serverTimestamp()
-      }, { merge: true });
+      tx.set(vanRef, updatedVan, { merge: true });
       tx.delete(lockRef);
       const eventRef = db.collection('syncQueue').doc();
       tx.set(eventRef, { type: 'INSPECTION_COMPLETED', inspectionId, vanId, state: 'Pending', createdAt: FieldValue.serverTimestamp(), attempts: 0 });
-      return { alreadyCompleted: false, inspection: completed };
+      return { alreadyCompleted: false, inspection: serialize(completed), van: serialize(updatedVan) };
     });
     res.json({ ok: true, ...result });
   } catch (error) { next(error); }
@@ -204,7 +327,7 @@ app.delete('/v1/inspection-locks/:vanId', requireAuth, async (req, res, next) =>
 app.get('/v1/admin/locks', requireAuth, requireAdmin, async (_req, res, next) => {
   try {
     const snap = await db.collection('inspectionLocks').limit(250).get();
-    res.json({ ok: true, locks: snap.docs.map(doc => ({ id: doc.id, ...doc.data() })) });
+    res.json({ ok: true, locks: snap.docs.map(docData) });
   } catch (error) { next(error); }
 });
 
