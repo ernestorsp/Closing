@@ -1,7 +1,7 @@
 <script>
 (function(){
   'use strict';
-  const STATE={firebaseUser:null,bootstrap:null,lastError:null,ready:false,currentLock:null,heartbeat:null,wrapped:false};
+  const STATE={firebaseUser:null,bootstrap:null,lastError:null,ready:false,currentLock:null,heartbeat:null,wrapperTimer:null,wrapped:{logout:false,spots:false,claim:false}};
   function isEnabled(){return !!(window.AAXI_FIREBASE&&window.AAXI_FIREBASE.enabled())}
   function cloudReady(){return isEnabled()&&!!window.AAXI_FIREBASE.auth.currentUser}
   function report(error){STATE.lastError=error;console.error('[Firebase migration]',error)}
@@ -46,10 +46,12 @@
     },true);
   }
   function wrapLogout(){
-    if(typeof window.doLogout!=='function'||window.doLogout._firebaseWrapped)return;
+    if(STATE.wrapped.logout)return true;
+    if(typeof window.doLogout!=='function')return false;
+    if(window.doLogout._firebaseWrapped){STATE.wrapped.logout=true;return true}
     const original=window.doLogout;
     window.doLogout=function(){stopHeartbeat();STATE.currentLock=null;if(isEnabled())window.AAXI_FIREBASE.signOut().catch(report);return original.apply(this,arguments)};
-    window.doLogout._firebaseWrapped=true;
+    window.doLogout._firebaseWrapped=true;STATE.wrapped.logout=true;return true;
   }
   function startHeartbeat(){
     stopHeartbeat();
@@ -74,7 +76,9 @@
     CURRENT=null;PHOTO_UPLOADS.clear();setLocationBusy(false);setBusy(false);showPage('pending');renderVans();toast(conflict?'This van is already being inspected by another user.':message,true);
   }
   function wrapSpotReads(){
-    if(typeof window.refreshAvailableSpots!=='function'||window.refreshAvailableSpots._firebaseWrapped)return;
+    if(STATE.wrapped.spots)return true;
+    if(typeof window.refreshAvailableSpots!=='function')return false;
+    if(window.refreshAvailableSpots._firebaseWrapped){STATE.wrapped.spots=true;return true}
     const original=window.refreshAvailableSpots;
     window.refreshAvailableSpots=function(vanId,station,selected){
       if(!cloudReady())return original.apply(this,arguments);
@@ -84,18 +88,21 @@
         applyAvailableSpots((result.spots||[]).map(uiSpot),station,currentSelection);
       }).catch(error=>{report(error);original(vanId,station,selected)});
     };
-    window.refreshAvailableSpots._firebaseWrapped=true;
+    window.refreshAvailableSpots._firebaseWrapped=true;STATE.wrapped.spots=true;return true;
   }
   function wrapClaim(){
-    if(typeof window.claimCurrentInspection!=='function'||window.claimCurrentInspection._firebaseWrapped)return;
+    if(STATE.wrapped.claim)return true;
+    if(typeof window.claimCurrentInspection!=='function')return false;
+    if(window.claimCurrentInspection._firebaseWrapped){STATE.wrapped.claim=true;return true}
     const original=window.claimCurrentInspection;
     window.claimCurrentInspection=function(next,onFailure){
       if(!cloudReady())return original.apply(this,arguments);
       if(!CURRENT)return;
-      if(CURRENT.inspection.InspectionID)return next();
+      const vanId=String(CURRENT.inspection.VanID||'');
+      if(STATE.currentLock&&String(STATE.currentLock.vanId)===vanId)return next();
       INSPECTION_CLAIM_QUEUE.push({next,onFailure});if(INSPECTION_CLAIMING)return;
       INSPECTION_CLAIMING=true;
-      const vanId=String(CURRENT.inspection.VanID),id=inspectionId();
+      const id=inspectionId();
       window.AAXI_FIREBASE.claim(vanId,id).then(()=>window.AAXI_FIREBASE.getInspection(id)).then(async cloud=>{
         INSPECTION_CLAIMING=false;
         if(!CURRENT||String(CURRENT.inspection.VanID)!==vanId){INSPECTION_CLAIM_QUEUE=[];await window.AAXI_FIREBASE.release(vanId).catch(report);return}
@@ -107,18 +114,27 @@
         const queue=INSPECTION_CLAIM_QUEUE.splice(0);queue.forEach(item=>item.next());
       }).catch(error=>failClaim(vanId,error));
     };
-    window.claimCurrentInspection._firebaseWrapped=true;
+    window.claimCurrentInspection._firebaseWrapped=true;STATE.wrapped.claim=true;return true;
   }
-  function installWrappers(){if(STATE.wrapped)return;wrapLogout();wrapSpotReads();wrapClaim();STATE.wrapped=true}
+  function installWrappers(){
+    bindParallelLogin();wrapLogout();wrapSpotReads();wrapClaim();
+    const complete=STATE.wrapped.logout&&STATE.wrapped.spots&&STATE.wrapped.claim;
+    if(complete&&STATE.wrapperTimer){clearInterval(STATE.wrapperTimer);STATE.wrapperTimer=null}
+    return complete;
+  }
+  function beginWrapperRetry(){
+    installWrappers();
+    if(!STATE.wrapperTimer)STATE.wrapperTimer=setInterval(installWrappers,500);
+  }
   async function diagnostics(){
-    const result={enabled:isEnabled(),firebaseSignedIn:!!window.AAXI_FIREBASE.auth.currentUser,api:'https://aaxi-closing-api-lexfqgdyea-ue.a.run.app',wrappers:STATE.wrapped};
+    const result={enabled:isEnabled(),firebaseSignedIn:!!window.AAXI_FIREBASE.auth.currentUser,api:'https://aaxi-closing-api-lexfqgdyea-ue.a.run.app',wrappers:{...STATE.wrapped},currentLock:STATE.currentLock};
     if(result.firebaseSignedIn){try{const cloud=await loadCloudBootstrap();result.cloud={ok:true,vans:(cloud.vans||[]).length,spots:(cloud.spots||[]).length,locks:(cloud.locks||[]).length}}catch(error){result.cloud={ok:false,code:error.code||'',message:error.message};report(error)}}
     console.table(result.cloud||result);return result;
   }
   document.addEventListener('DOMContentLoaded',function(){
-    bindParallelLogin();setTimeout(installWrappers,0);
+    beginWrapperRetry();
     window.AAXI_FIREBASE.onAuthChanged(async user=>{
-      STATE.firebaseUser=user||null;STATE.ready=true;
+      STATE.firebaseUser=user||null;STATE.ready=true;beginWrapperRetry();
       if(user&&isEnabled()&&DATA&&DATA.user){try{await loadCloudBootstrap(DATA.user.station)}catch(error){report(error)}}
     });
   });
