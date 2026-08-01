@@ -1,0 +1,57 @@
+<script>
+(function(){
+  'use strict';
+  const STATE={firebaseUser:null,bootstrap:null,lastError:null,ready:false};
+  function isEnabled(){return !!(window.AAXI_FIREBASE&&window.AAXI_FIREBASE.enabled())}
+  function report(error){STATE.lastError=error;console.error('[Firebase migration]',error)}
+  async function signInAlongsideCurrentLogin(email,password){
+    if(!isEnabled())return null;
+    try{
+      const user=await window.AAXI_FIREBASE.signIn(email,password);
+      STATE.firebaseUser=user;
+      return user;
+    }catch(error){report(error);return null}
+  }
+  async function loadCloudBootstrap(station){
+    if(!isEnabled()||!window.AAXI_FIREBASE.auth.currentUser)return null;
+    const result=await window.AAXI_FIREBASE.bootstrap(station||DATA&&DATA.user&&DATA.user.station||'DJX3');
+    STATE.bootstrap=result;
+    return result;
+  }
+  function bindParallelLogin(){
+    const form=document.getElementById('loginForm');
+    if(!form||form.dataset.firebaseBound==='1')return;
+    form.dataset.firebaseBound='1';
+    form.addEventListener('submit',function(){
+      if(!isEnabled())return;
+      const email=String(form.elements.email&&form.elements.email.value||'').trim();
+      const password=String(form.elements.password&&form.elements.password.value||'');
+      if(email&&password)signInAlongsideCurrentLogin(email,password);
+    },true);
+  }
+  function wrapLogout(){
+    if(typeof window.doLogout!=='function'||window.doLogout._firebaseWrapped)return;
+    const original=window.doLogout;
+    window.doLogout=function(){if(isEnabled())window.AAXI_FIREBASE.signOut().catch(report);return original.apply(this,arguments)};
+    window.doLogout._firebaseWrapped=true;
+  }
+  async function diagnostics(){
+    const result={enabled:isEnabled(),firebaseSignedIn:!!window.AAXI_FIREBASE.auth.currentUser,api:'https://aaxi-closing-api-lexfqgdyea-ue.a.run.app'};
+    if(result.firebaseSignedIn){
+      try{const cloud=await loadCloudBootstrap();result.cloud={ok:true,vans:(cloud.vans||[]).length,spots:(cloud.spots||[]).length,locks:(cloud.locks||[]).length}}
+      catch(error){result.cloud={ok:false,code:error.code||'',message:error.message};report(error)}
+    }
+    console.table(result.cloud||result);
+    return result;
+  }
+  document.addEventListener('DOMContentLoaded',function(){
+    bindParallelLogin();wrapLogout();
+    window.AAXI_FIREBASE.onAuthChanged(async user=>{
+      STATE.firebaseUser=user||null;
+      STATE.ready=true;
+      if(user&&isEnabled()&&DATA&&DATA.user){try{await loadCloudBootstrap(DATA.user.station)}catch(error){report(error)}}
+    });
+  });
+  window.AAXI_FIREBASE_INTEGRATION={STATE,isEnabled,setEnabled:value=>window.AAXI_FIREBASE.setEnabled(value),signInAlongsideCurrentLogin,loadCloudBootstrap,diagnostics};
+})();
+</script>
