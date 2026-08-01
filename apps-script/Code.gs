@@ -117,6 +117,9 @@ function finishInspection(token,input){
   const s=auth_(token);
   return lock_(()=>{
     const ss=db_(),i=find_(ss,APP.SHEETS.inspections,'InspectionID',input.inspectionId);
+    if(!i)throw new Error('Inspection not found.');
+    if(norm_(i.UserEmail)!==norm_(s.email))throw new Error('Inspection belongs to another user.');
+    if(i.InspectionState==='Completed')return{ok:true,alreadyCompleted:true,message:'Inspection completed.',inspection:i,van:find_(ss,APP.SHEETS.vans,'VanID',i.VanID)};
     editable_(i,s.email);
     const station=String(input.station||i.Station||'');
     if(!APP.STATIONS.includes(station))throw new Error('Select a valid van location.');
@@ -139,13 +142,13 @@ function finishInspection(token,input){
       if(input.newDamageFound==='Yes'&&!rows_(ss.getSheetByName(APP.SHEETS.damages)).some(x=>String(x.InspectionID)===String(i.InspectionID)&&x.Assessment==='New Damage'))throw new Error('Add the new defect and close-up photo.');
     }
     const changed=String(i.PreviousStation||'')!==station,now=new Date(),photoCount=rows_(ss.getSheetByName(APP.SHEETS.photos)).filter(x=>String(x.InspectionID)===String(i.InspectionID)&&APP.PARTS.includes(x.Part)).length,finalNotes=atShop?(notes?notes+' · At SHOP.':'At SHOP.'):(notes||'');
-    update_(ss.getSheetByName(APP.SHEETS.inspections),'InspectionID',i.InspectionID,{Station:station,Spot:atShop?'SHOP':spot,CompletedAt:now,DurationMinutes:Math.max(1,Math.round((now-new Date(i.StartedAt))/60000)),Status:status,Notes:finalNotes,PhotoProgress:photoCount+'/6',InspectionState:'Completed',LocationChanged:changed});
     clearVanSpot_(ss,i.VanID);
     if(!transfer&&!atShop){displacePendingSpot_(ss,station,spot,i.VanID);occupy_(ss,station,spot,i.VanID)}
     release_(ss,i,s.email);
     const currentVan=find_(ss,APP.SHEETS.vans,'VanID',i.VanID),homeStation=APP.WORK_STATIONS.includes(station)?station:vanStation_(currentVan);
     update_(ss.getSheetByName(APP.SHEETS.vans),'VanID',i.VanID,{HomeStation:homeStation,CurrentStation:station,CurrentSpot:atShop?'SHOP':spot,CurrentStatus:status,LastInspectionAt:now,LastInspectionID:i.InspectionID,UpdatedAt:now});
-    audit_(s.email,transfer?'TRANSFER_VAN':'FINISH_INSPECTION','INSPECTION',i.InspectionID,status);
+    update_(ss.getSheetByName(APP.SHEETS.inspections),'InspectionID',i.InspectionID,{Station:station,Spot:atShop?'SHOP':spot,CompletedAt:now,DurationMinutes:Math.max(1,Math.round((now-new Date(i.StartedAt))/60000)),Status:status,Notes:finalNotes,PhotoProgress:photoCount+'/6',InspectionState:'Completed',LocationChanged:changed});
+    try{audit_(s.email,transfer?'TRANSFER_VAN':'FINISH_INSPECTION','INSPECTION',i.InspectionID,status)}catch(e){}
     return{ok:true,message:transfer?'Van moved to '+station+'.':'Inspection completed.',inspection:find_(ss,APP.SHEETS.inspections,'InspectionID',i.InspectionID),van:find_(ss,APP.SHEETS.vans,'VanID',i.VanID)}
   })
 }
