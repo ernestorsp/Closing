@@ -1,0 +1,135 @@
+<script>
+(function(){
+  'use strict';
+  let installed=false;
+
+  function enabled(){
+    return !!(window.AAXI_FIREBASE && window.AAXI_FIREBASE.enabled());
+  }
+
+  function ready(){
+    return enabled() && !!window.AAXI_FIREBASE.auth.currentUser;
+  }
+
+  function newInspectionId(){
+    return crypto.randomUUID();
+  }
+
+  function uiSpot(row){
+    return {
+      SpotID:String(row.id||row.spotId||((row.station||'')+'_'+(row.spot||''))),
+      Station:String(row.station||''),
+      Spot:String(row.spot||''),
+      OccupiedByVanID:String(row.vanId||'')
+    };
+  }
+
+  function uiInspection(cloud){
+    const i=cloud.inspection||{};
+    return {
+      inspection:{
+        InspectionID:String(i.inspectionId||i.id||''),
+        VanID:String(i.vanId||''),
+        VanNumber:String(i.vanNumber||''),
+        UserEmail:String(i.ownerEmail||''),
+        UserName:String(i.ownerName||''),
+        WorkingStation:String(i.workingStation||i.station||''),
+        PreviousStation:String(i.previousStation||i.station||''),
+        Station:String(i.station||''),
+        PreviousSpot:String(i.previousSpot||''),
+        Spot:String(i.spot||''),
+        PreviousStatus:String(i.previousStatus||i.status||'Operational'),
+        Status:String(i.status||'Operational'),
+        Notes:String(i.notes||''),
+        StartedAt:i.startedAt||new Date().toISOString(),
+        PhotoProgress:String((cloud.photos||[]).length)+'/6',
+        InspectionState:i.state==='Completed'?'Completed':'In Progress'
+      },
+      lastInspection:null,
+      photos:(cloud.photos||[]).map(p=>({
+        PhotoID:p.id||p.photoId,Part:p.part,FileURL:p.url||'',CapturedAt:p.createdAt,
+        DamageAssessment:p.assessment||'No Damage',DamageNotes:p.notes||''
+      })),
+      damages:(cloud.damages||[]).map(d=>({
+        DamageID:d.id||d.damageId,Part:d.part,Severity:d.severity,
+        PhotoID:d.photoId||'',ReportedAt:d.createdAt
+      })),
+      spots:[],
+      requiredParts:['Front','Driver Side','Rear','Passenger Side','Cargo Interior','Cabin Interior'],
+      statuses:['Operational','Downed','Grounded']
+    };
+  }
+
+  function resetAfterFailure(vanId,error){
+    const message=error&&error.message||String(error||'Could not claim inspection lock.');
+    const conflict=(error&&error.code==='VAN_LOCKED')||/another user|locked/i.test(message);
+    if(conflict && window.BLOCKED_VANS) BLOCKED_VANS.add(String(vanId));
+    if(typeof setBusy==='function')setBusy(false);
+    if(typeof setFinishBusy==='function')setFinishBusy(false);
+    if(typeof renderVans==='function')renderVans();
+    if(typeof showPage==='function')showPage('pending');
+    if(typeof toast==='function')toast(conflict?'This van is already being inspected by another session.':message,true);
+  }
+
+  function install(){
+    if(installed || typeof window.startInspection!=='function')return false;
+    const original=window.startInspection;
+    if(original._firebaseLockGate){installed=true;return true;}
+
+    window.startInspection=function(vanId,button){
+      if(!enabled())return original.apply(this,arguments);
+
+      if(button){
+        if(typeof quickActionDelay==='function')return quickActionDelay(button,()=>window.startInspection(vanId),'');
+      }
+
+      if(!ready()){
+        if(typeof toast==='function')toast('Firebase test session is not connected. Sign out and sign in again.',true);
+        return;
+      }
+
+      const van=(window.DATA&&DATA.vans||[]).find(x=>String(x.VanID)===String(vanId));
+      if(!van)return;
+      if(window.BLOCKED_VANS&&BLOCKED_VANS.has(String(vanId)))return;
+
+      if(typeof setBusy==='function')setBusy(true);
+      const inspectionId=newInspectionId();
+
+      window.AAXI_FIREBASE.claim(String(vanId),inspectionId)
+        .then(()=>window.AAXI_FIREBASE.getInspection(inspectionId))
+        .then(async cloud=>{
+          const data=uiInspection(cloud);
+          if(data.inspection.Station!=='SHOP' && data.inspection.Station===data.inspection.WorkingStation){
+            try{
+              const result=await window.AAXI_FIREBASE.spots(data.inspection.Station,String(vanId));
+              data.spots=(result.spots||[]).map(uiSpot);
+            }catch(error){console.error('[Firebase lock gate spots]',error);}
+          }
+          if(typeof setBusy==='function')setBusy(false);
+          if(typeof renderInspection==='function')renderInspection(data);
+          if(typeof showPage==='function')showPage('inspection');
+          const integration=window.AAXI_FIREBASE_INTEGRATION;
+          if(integration&&integration.STATE){
+            integration.STATE.currentLock={vanId:String(vanId),inspectionId};
+          }
+          document.documentElement.dataset.firebaseLock='active';
+        })
+        .catch(error=>resetAfterFailure(vanId,error));
+    };
+
+    window.startInspection._firebaseLockGate=true;
+    window.startInspection._firebaseOriginal=original;
+    installed=true;
+    console.info('[Firebase lock gate] installed');
+    return true;
+  }
+
+  document.addEventListener('DOMContentLoaded',()=>{
+    install();
+    const timer=setInterval(()=>{if(install())clearInterval(timer)},250);
+    setTimeout(()=>clearInterval(timer),30000);
+  });
+
+  window.AAXI_FIREBASE_LOCK_GATE={install,installed:()=>installed};
+})();
+</script>
