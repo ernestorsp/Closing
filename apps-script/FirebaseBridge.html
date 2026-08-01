@@ -40,10 +40,12 @@
       throw error;
     }finally{clearTimeout(timer)}
   }
+  function query(path,values){const q=new URLSearchParams();Object.entries(values||{}).forEach(([key,value])=>{if(value!==undefined&&value!==null&&String(value)!=='')q.set(key,String(value))});const text=q.toString();return path+(text?'?'+text:'')}
   async function signIn(email,password){return (await auth.signInWithEmailAndPassword(email,password)).user}
   async function signOut(){return auth.signOut()}
-  async function bootstrap(station){return request('/v1/bootstrap'+(station?'?station='+encodeURIComponent(station):''))}
-  async function spots(station,vanId){const q=new URLSearchParams({station:String(station||'')});if(vanId)q.set('vanId',String(vanId));return request('/v1/spots?'+q.toString())}
+
+  async function bootstrap(station){return request(query('/v1/bootstrap',{station}))}
+  async function spots(station,vanId){return request(query('/v1/spots',{station,vanId}))}
   async function getInspection(inspectionId){return request('/v1/inspections/'+encodeURIComponent(inspectionId))}
   async function claim(vanId,inspectionId){return request('/v1/inspection-locks/claim',{method:'POST',body:{vanId:String(vanId),inspectionId:String(inspectionId)}})}
   async function renew(vanId,inspectionId){return request('/v1/inspection-locks/renew',{method:'POST',body:{vanId:String(vanId),inspectionId:String(inspectionId)}})}
@@ -51,6 +53,24 @@
   async function finish(payload){return request('/v1/inspections/finish',{method:'POST',timeout:30000,body:payload})}
   async function registerPhoto(inspectionId,payload){return request('/v1/inspections/'+encodeURIComponent(inspectionId)+'/photos',{method:'POST',body:payload})}
   async function registerDamage(inspectionId,payload){return request('/v1/inspections/'+encodeURIComponent(inspectionId)+'/damages',{method:'POST',body:payload})}
+
+  const operations={
+    dashboard:(station,date)=>request(query('/v1/operations/dashboard',{station,date})),
+    getRescues:(station,date)=>request(query('/v1/operations/rescues',{station,date})),
+    saveRescues:payload=>request('/v1/operations/rescues',{method:'PUT',body:payload}),
+    getClosing:(station,date)=>request(query('/v1/operations/closing',{station,date})),
+    saveClosing:payload=>request('/v1/operations/closing',{method:'PUT',body:payload}),
+    getHistory:(vanId,limit)=>request(query('/v1/operations/history',{vanId,limit:limit||10})),
+    getAvatarMessages:station=>request(query('/v1/operations/avatar/messages',{station})),
+    sendAvatarMessage:payload=>request('/v1/operations/avatar/messages',{method:'POST',body:payload}),
+    acceptAvatarMessage:messageId=>request('/v1/operations/avatar/messages/'+encodeURIComponent(messageId)+'/accept',{method:'POST'}),
+    getUsers:()=>request('/v1/operations/admin/users'),
+    updateUser:(uid,payload)=>request('/v1/operations/admin/users/'+encodeURIComponent(uid),{method:'PATCH',body:payload}),
+    removeUser:uid=>request('/v1/operations/admin/users/'+encodeURIComponent(uid),{method:'DELETE'}),
+    getNotes:(station,date)=>request(query('/v1/operations/notes',{station,date})),
+    saveNotes:payload=>request('/v1/operations/notes',{method:'PUT',body:payload})
+  };
+
   function dataUrlToFile(dataUrl,fileName){
     const parts=String(dataUrl||'').split(','),match=parts[0]&&parts[0].match(/^data:([^;]+);base64$/);
     if(!match)throw new Error('Invalid image data.');
@@ -66,6 +86,6 @@
     return{path,url:await snapshot.ref.getDownloadURL(),size:snapshot.totalBytes,contentType:file.type};
   }
   async function uploadDataUrl(inspectionId,dataUrl,fileName,metadata){return uploadPhoto(inspectionId,dataUrlToFile(dataUrl,fileName),fileName,metadata)}
-  window.AAXI_FIREBASE={app,auth,storage,enabled,setEnabled,signIn,signOut,bootstrap,spots,getInspection,claim,renew,release,finish,registerPhoto,registerDamage,uploadPhoto,uploadDataUrl,request,onAuthChanged:callback=>auth.onAuthStateChanged(callback)};
+  window.AAXI_FIREBASE={app,auth,storage,enabled,setEnabled,signIn,signOut,bootstrap,spots,getInspection,claim,renew,release,finish,registerPhoto,registerDamage,uploadPhoto,uploadDataUrl,operations,request,onAuthChanged:callback=>auth.onAuthStateChanged(callback)};
 })();
 </script>
