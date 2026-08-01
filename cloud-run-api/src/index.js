@@ -14,9 +14,21 @@ const ALLOWED_ORIGINS = String(process.env.ALLOWED_ORIGINS || 'https://ernestors
 
 app.disable('x-powered-by');
 app.use(express.json({ limit: '2mb' }));
+function isAllowedOrigin(origin) {
+  if (!origin) return false;
+  if (ALLOWED_ORIGINS.includes(origin)) return true;
+  try {
+    const url = new URL(origin);
+    return url.protocol === 'https:' && (
+      url.hostname === 'script.google.com' ||
+      url.hostname.endsWith('.googleusercontent.com')
+    );
+  } catch (_error) { return false; }
+}
+
 app.use((req, res, next) => {
   const origin = req.headers.origin;
-  if (origin && ALLOWED_ORIGINS.includes(origin)) {
+  if (isAllowedOrigin(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Vary', 'Origin');
     res.setHeader('Access-Control-Allow-Headers', 'authorization,content-type,x-request-id');
