@@ -324,7 +324,7 @@ function showAuth(){showSessionLoading(false);showAuthForm('loginForm');document
 function showAuthForm(id){document.getElementById('auth').style.display='grid';['loginForm','forgotForm','resetForm','inviteForm','passwordForm'].forEach(x=>document.getElementById(x).hidden=x!==id)}
 function showForgotPassword(){showAuthForm('forgotForm')}
 function showLogin(){showAuthForm('loginForm')}
-function finishInvitationActivation(result,inviteForm){setBusy(false);TOKEN='';saveSessionToken('');if(window.CLOSING_ENTRY){window.CLOSING_ENTRY.mode='login';window.CLOSING_ENTRY.token=''}inviteForm.reset();const login=document.getElementById('loginForm');login.reset();login.elements.email.value=String(result.email||'');showLogin();login.elements.password.focus();toast(result.message||'Account activated. You can sign in now.');try{history.replaceState({},'',location.pathname)}catch(e){}}
+function finishInvitationActivation(result,inviteForm){setBusy(false);TOKEN='';saveSessionToken('');window.location.replace('https://ernestorsp.github.io/APP-CLOSING/')}
 function showSessionLoading(show){const x=document.getElementById('sessionLoading');x.hidden=!show;if(show){document.getElementById('auth').style.display='none';document.getElementById('app').hidden=true}setBusy(show)}
 function authFail(e){showSessionLoading(false);if(String(e.message||e).includes('AUTH_REQUIRED')){TOKEN='';saveSessionToken('');showAuth()}toast(e.message||String(e),true)}
 function failBusy(e){setBusy(false);toast(e.message||String(e),true)}
