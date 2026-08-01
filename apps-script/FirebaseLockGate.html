@@ -2,6 +2,7 @@
 (function(){
   'use strict';
   let installed=false;
+  let redirectingToLogin=false;
 
   function enabled(){
     return !!(window.AAXI_FIREBASE && window.AAXI_FIREBASE.enabled());
@@ -71,6 +72,20 @@
     if(typeof toast==='function')toast(conflict?'This van is already being inspected by another session.':message,true);
   }
 
+  async function forceFirebaseLogin(){
+    if(redirectingToLogin)return;
+    redirectingToLogin=true;
+    try{
+      alert('Esta ventana restauró la sesión de CLOSING, pero no inició Firebase. Vas a volver al login para conectar ambas sesiones.');
+      try{await window.AAXI_FIREBASE.signOut()}catch(_error){}
+      localStorage.removeItem('closing_token');
+      localStorage.removeItem('aaxi_closing_app_cache_v2');
+      if(typeof window.TOKEN!=='undefined')window.TOKEN='';
+    }finally{
+      location.reload();
+    }
+  }
+
   function install(){
     if(installed || typeof window.startInspection!=='function')return false;
     const original=window.startInspection;
@@ -84,7 +99,7 @@
       }
 
       if(!ready()){
-        if(typeof toast==='function')toast('Firebase test session is not connected. Sign out and sign in again.',true);
+        forceFirebaseLogin();
         return;
       }
 
@@ -130,6 +145,6 @@
     setTimeout(()=>clearInterval(timer),30000);
   });
 
-  window.AAXI_FIREBASE_LOCK_GATE={install,installed:()=>installed};
+  window.AAXI_FIREBASE_LOCK_GATE={install,installed:()=>installed,forceFirebaseLogin};
 })();
 </script>
