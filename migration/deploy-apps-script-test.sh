@@ -30,7 +30,7 @@ npx --yes @google/clasp pull
 tar -czf "$BACKUPS/apps-script-$STAMP.tar.gz" --exclude='.clasp.json' .
 echo "Backup created: $BACKUPS/apps-script-$STAMP.tar.gz"
 
-for file in FirebaseBridge.html FirebaseTestMode.html FirebaseIntegration.html FirebaseInspectionOverrides.html FirebaseBootstrapOverrides.html; do
+for file in FirebaseBridge.html FirebaseTestMode.html FirebaseIntegration.html FirebaseInspectionOverrides.html FirebaseBootstrapOverrides.html FirebaseLockGate.html; do
   cp "$ROOT/apps-script/$file" "$WORK/$file"
 done
 
@@ -47,6 +47,7 @@ includes = [
     "<?!= include_('FirebaseIntegration'); ?>",
     "<?!= include_('FirebaseInspectionOverrides'); ?>",
     "<?!= include_('FirebaseBootstrapOverrides'); ?>",
+    "<?!= include_('FirebaseLockGate'); ?>",
 ]
 if base not in text:
     raise SystemExit("The Scripts include was not found in live Index.html; nothing was pushed.")
