@@ -8,6 +8,8 @@ ORIGINS="${ALLOWED_ORIGINS:-https://ernestorsp.github.io}"
 
 command -v gcloud >/dev/null 2>&1 || { echo 'gcloud CLI is required.' >&2; exit 1; }
 
+bash migration/patch-cloud-run-cors.sh
+
 gcloud config set project "$PROJECT_ID"
 gcloud services enable \
   run.googleapis.com \
