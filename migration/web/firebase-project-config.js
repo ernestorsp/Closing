@@ -10,7 +10,7 @@ export const AAXI_FIREBASE_CONFIG = Object.freeze({
 
 export const AAXI_MIGRATION_CONFIG = Object.freeze({
   enabled: false,
-  apiBaseUrl: '',
+  apiBaseUrl: 'https://aaxi-closing-api-lexfqgdyea-ue.a.run.app',
   rolloutUsers: [],
   storageRoot: 'inspection-photos',
   lockHeartbeatMs: 90_000
