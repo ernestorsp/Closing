@@ -23,7 +23,7 @@
     </div>
   </div>
 </div></section>
-<section id="pending" class="page"><div class="sectionTitle"><div><h2>Van inspections</h2><p id="pendingMeta"></p></div><input id="vanSearch" placeholder="Search van"></div><div id="inspectionSkipPanel" class="panel inspectionSkipPanel"><div><h3>Skip remaining inspections</h3><p id="inspectionSkipMeta">An Admin must approve before Inspections becomes Ready.</p></div><button id="inspectionSkipBtn" class="skipRequestBtn" onclick="requestInspectionSkipNow(this)">REQUEST SKIP</button></div><div id="vanList" class="cards"></div></section>
+<section id="pending" class="page"><div class="sectionTitle"><div><h2>Van inspections</h2><p id="pendingMeta"></p></div><input id="vanSearch" placeholder="Search van"></div><div id="inspectionSkipPanel" class="panel inspectionSkipPanel"><div><h3>Skip remaining inspections</h3><p id="inspectionSkipMeta">Choose an Admin to request permission.</p></div><div class="inspectionSkipActions"><select id="inspectionSkipAdmin" aria-label="Admin to request permission"></select><button id="inspectionSkipBtn" class="skipRequestBtn" onclick="requestInspectionSkipNow(this)">REQUEST SKIP</button></div></div><div id="vanList" class="cards"></div></section>
 <section id="history" class="page"><div class="sectionTitle"><h2>Van history</h2><input id="historySearch" placeholder="Search van"></div><div id="historyVans" class="cards"></div><div id="historyList" class="cards"></div></section>
 <section id="avatar" class="page" data-admin-only>
 <div class="sectionTitle"><div><h2>Avatar messages</h2><p>Send an important message to a station or a specific user through Closing Buddy.</p></div></div>
