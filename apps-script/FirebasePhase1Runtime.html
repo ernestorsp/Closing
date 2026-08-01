@@ -1,0 +1,59 @@
+<script>
+(function(){
+  'use strict';
+  const STATE={installed:false,timer:null,releasing:false,lastVanId:'',lastInspectionId:'',wrapped:{showPage:false,logout:false}};
+  function cloudReady(){return !!(window.AAXI_FIREBASE&&window.AAXI_FIREBASE.enabled()&&window.AAXI_FIREBASE.auth.currentUser)}
+  function integrationState(){return window.AAXI_FIREBASE_INTEGRATION&&window.AAXI_FIREBASE_INTEGRATION.STATE}
+  function remember(){
+    const state=integrationState(),current=window.CURRENT&&CURRENT.inspection;
+    if(state&&state.currentLock){STATE.lastVanId=String(state.currentLock.vanId||'');STATE.lastInspectionId=String(state.currentLock.inspectionId||'');return}
+    if(current){STATE.lastVanId=String(current.VanID||STATE.lastVanId||'');STATE.lastInspectionId=String(current.InspectionID||STATE.lastInspectionId||'')}
+  }
+  function clearLocalLock(){
+    const state=integrationState();
+    if(state){if(state.heartbeat)clearInterval(state.heartbeat);state.heartbeat=null;state.currentLock=null}
+    STATE.lastVanId='';STATE.lastInspectionId='';
+  }
+  async function releaseCurrent(reason){
+    remember();
+    const vanId=STATE.lastVanId;
+    if(!vanId||STATE.releasing||!cloudReady()){if(!cloudReady())clearLocalLock();return}
+    STATE.releasing=true;
+    try{await window.AAXI_FIREBASE.release(vanId)}catch(error){if(!['LOCK_NOT_OWNED','HTTP_ERROR'].includes(error&&error.code))console.warn('[Firebase release '+reason+']',error)}
+    finally{STATE.releasing=false;clearLocalLock();if(window.BLOCKED_VANS&&typeof BLOCKED_VANS.delete==='function')BLOCKED_VANS.delete(String(vanId))}
+  }
+  function wrapShowPage(){
+    if(STATE.wrapped.showPage)return true;
+    if(typeof window.showPage!=='function')return false;
+    if(window.showPage._firebasePhase1Wrapped){STATE.wrapped.showPage=true;return true}
+    const original=window.showPage;
+    window.showPage=function(page){
+      const leaving=page!=='inspection'&&window.CURRENT&&CURRENT.inspection;
+      if(leaving)releaseCurrent('page-change');
+      return original.apply(this,arguments);
+    };
+    window.showPage._firebasePhase1Wrapped=true;STATE.wrapped.showPage=true;return true;
+  }
+  function wrapLogout(){
+    if(STATE.wrapped.logout)return true;
+    if(typeof window.doLogout!=='function')return false;
+    if(window.doLogout._firebasePhase1RuntimeWrapped){STATE.wrapped.logout=true;return true}
+    const original=window.doLogout;
+    window.doLogout=function(){releaseCurrent('logout');return original.apply(this,arguments)};
+    window.doLogout._firebasePhase1RuntimeWrapped=true;STATE.wrapped.logout=true;return true;
+  }
+  function bindLifecycle(){
+    window.addEventListener('pagehide',()=>{remember();const vanId=STATE.lastVanId;if(!vanId||!cloudReady())return;window.AAXI_FIREBASE.release(vanId).catch(()=>{})});
+    window.addEventListener('beforeunload',remember);
+    document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden')remember()});
+  }
+  function install(){
+    wrapShowPage();wrapLogout();remember();
+    STATE.installed=STATE.wrapped.showPage&&STATE.wrapped.logout;
+    if(STATE.installed&&STATE.timer){clearInterval(STATE.timer);STATE.timer=null}
+    return STATE.installed;
+  }
+  document.addEventListener('DOMContentLoaded',()=>{bindLifecycle();install();STATE.timer=setInterval(install,500)});
+  window.AAXI_FIREBASE_PHASE1={STATE,install,releaseCurrent,remember};
+})();
+</script>
