@@ -30,7 +30,7 @@ npx --yes @google/clasp pull
 tar -czf "$BACKUPS/apps-script-$STAMP.tar.gz" --exclude='.clasp.json' .
 echo "Backup created: $BACKUPS/apps-script-$STAMP.tar.gz"
 
-for file in FirebaseBridge.html FirebaseTestMode.html FirebaseIntegration.html FirebaseInspectionOverrides.html FirebaseBootstrapOverrides.html FirebaseLockGate.html; do
+for file in FirebaseBridge.html FirebaseTestMode.html FirebaseIntegration.html FirebaseInspectionOverrides.html FirebaseBootstrapOverrides.html FirebaseLockGate.html FirebasePhase1Runtime.html; do
   cp "$ROOT/apps-script/$file" "$WORK/$file"
 done
 
@@ -48,6 +48,7 @@ includes = [
     "<?!= include_('FirebaseInspectionOverrides'); ?>",
     "<?!= include_('FirebaseBootstrapOverrides'); ?>",
     "<?!= include_('FirebaseLockGate'); ?>",
+    "<?!= include_('FirebasePhase1Runtime'); ?>",
 ]
 if base not in text:
     raise SystemExit("The Scripts include was not found in live Index.html; nothing was pushed.")
@@ -60,6 +61,6 @@ PY
 npx --yes @google/clasp push -f
 
 echo
-echo "Firebase test files were pushed to Apps Script."
+echo "Firebase migration files were pushed to Apps Script."
 echo "No deployment was changed automatically."
 echo "Open Apps Script > Deploy > Manage deployments, edit the current web app, choose New version, and deploy."
