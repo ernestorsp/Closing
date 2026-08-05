@@ -118,8 +118,8 @@ function ensureDjx3VansInVanInfo_(){
     const home=String(row[indexes.home]||'').trim().toUpperCase();
     const current=String(row[indexes.current]||'').trim().toUpperCase();
     const active=indexes.active<0||isVanInfoActive_(row[indexes.active]);
-    const belongsToDjx3=home==='DJX3'||(!home&&current==='DJX3');
-    if(!vin||!active||!belongsToDjx3||existing.has(vin))return;
+    const shouldBeInVanInfo=current==='DJX3'||(home==='DJX3'&&current==='SHOP');
+    if(!vin||!active||!shouldBeInVanInfo||existing.has(vin))return;
     const output=new Array(VAN_INFO_SYNC.externalVinColumn).fill('');
     output[VAN_INFO_SYNC.externalVanNumberColumn-1]=String(row[indexes.number]||'').trim();
     output[VAN_INFO_SYNC.externalBagColumn-1]=normalizeVanInfoBag_(row[indexes.bag]);
