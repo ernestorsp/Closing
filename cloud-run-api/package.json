@@ -1,0 +1,16 @@
+{
+  "name": "aaxi-closing-api",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "start": "node --import ./src/register-operations.js src/index.js",
+    "check": "node --check src/index.js && node --check src/operations-router.js && node --check src/register-operations.js"
+  },
+  "dependencies": {
+    "@google-cloud/firestore": "^7.11.0",
+    "express": "^5.1.0",
+    "firebase-admin": "^13.4.0"
+  }
+}

@@ -1,0 +1,23 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function userDoc() { return get(/databases/$(database)/documents/users/$(request.auth.uid)); }
+    function activeUser() { return signedIn() && userDoc().data.active == true; }
+    function admin() { return activeUser() && userDoc().data.role == 'admin'; }
+
+    match /users/{uid} {
+      allow read: if activeUser() && (request.auth.uid == uid || admin());
+      allow write: if admin();
+    }
+    match /vans/{vanId} { allow read: if activeUser(); allow write: if false; }
+    match /spots/{spotId} { allow read: if activeUser(); allow write: if false; }
+    match /inspectionLocks/{vanId} { allow read: if activeUser(); allow write: if false; }
+    match /inspections/{inspectionId} {
+      allow read: if activeUser();
+      allow write: if false;
+      match /photos/{photoId} { allow read: if activeUser(); allow write: if false; }
+    }
+    match /syncQueue/{eventId} { allow read, write: if false; }
+  }
+}

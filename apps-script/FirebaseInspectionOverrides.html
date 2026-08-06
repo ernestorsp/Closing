@@ -1,0 +1,95 @@
+<script>
+(function(){
+  'use strict';
+  function cloudReady(){return !!(window.AAXI_FIREBASE&&window.AAXI_FIREBASE.enabled()&&window.AAXI_FIREBASE.auth.currentUser)}
+  function report(error){console.error('[Firebase inspections]',error)}
+  function currentInspectionId(){return CURRENT&&CURRENT.inspection&&String(CURRENT.inspection.InspectionID||'')}
+  function toUiInspection(cloud){
+    const i=cloud.inspection||{};
+    return{
+      inspection:{InspectionID:String(i.inspectionId||i.id||''),VanID:String(i.vanId||''),VanNumber:String(i.vanNumber||''),UserEmail:String(i.ownerEmail||''),UserName:String(i.ownerName||''),WorkingStation:String(i.workingStation||i.station||''),PreviousStation:String(i.previousStation||i.station||''),Station:String(i.station||''),PreviousSpot:String(i.previousSpot||''),Spot:String(i.spot||''),PreviousStatus:String(i.previousStatus||i.status||'Operational'),Status:String(i.status||'Operational'),Notes:String(i.notes||''),StartedAt:i.startedAt||new Date().toISOString(),PhotoProgress:String((cloud.photos||[]).length)+'/6',InspectionState:i.state==='Completed'?'Completed':'In Progress'},
+      lastInspection:null,
+      photos:(cloud.photos||[]).map(p=>({PhotoID:p.id||p.photoId,Part:p.part,FileURL:p.url||'',CapturedAt:p.createdAt,DamageAssessment:p.assessment||'No Damage',DamageNotes:p.notes||''})),
+      damages:(cloud.damages||[]).map(d=>({DamageID:d.id||d.damageId,Part:d.part,Severity:d.severity,PhotoID:d.photoId||'',ReportedAt:d.createdAt})),
+      spots:[],requiredParts:['Front','Driver Side','Rear','Passenger Side','Cargo Interior','Cabin Interior'],statuses:['Operational','Downed','Grounded']
+    }
+  }
+  function preserveAndRender(cloud){
+    const draft=CURRENT&&CURRENT.locationDraft,last=CURRENT&&CURRENT.lastInspection,data=toUiInspection(cloud);
+    data.locationDraft=draft||null;data.lastInspection=last||null;renderInspection(data);
+  }
+  function wrapPhotos(){
+    if(typeof window.capturePhoto!=='function'||window.capturePhoto._firebaseWrapped)return;
+    const original=window.capturePhoto;
+    window.capturePhoto=function(part,input,replace){
+      if(!cloudReady())return original.apply(this,arguments);
+      const file=input.files&&input.files[0];if(!file||PHOTO_UPLOADS.has(part))return;
+      PHOTO_UPLOADS.add(part);renderInspection(CURRENT);
+      resizeImage(file,1280,.78,data=>claimCurrentInspection(async()=>{
+        const inspectionId=currentInspectionId();if(!inspectionId){PHOTO_UPLOADS.delete(part);return}
+        const photoId=crypto.randomUUID();
+        try{
+          const uploaded=await window.AAXI_FIREBASE.uploadDataUrl(inspectionId,data,photoId+'.jpg',{part:String(part)});
+          await window.AAXI_FIREBASE.registerPhoto(inspectionId,{photoId,part,assessment:'No Damage',notes:'',storagePath:uploaded.path,contentType:uploaded.contentType,size:uploaded.size});
+          const cloud=await window.AAXI_FIREBASE.getInspection(inspectionId);
+          PHOTO_UPLOADS.delete(part);if(CURRENT&&currentInspectionId()===inspectionId)preserveAndRender(cloud);
+        }catch(error){PHOTO_UPLOADS.delete(part);report(error);if(CURRENT&&currentInspectionId()===inspectionId)renderInspection(CURRENT);toast('Optional photo was not saved. '+(error.message||String(error)),true)}
+      },error=>{PHOTO_UPLOADS.delete(part);toast('Optional photo was not saved. '+(error.message||String(error)),true)}));
+    };
+    window.capturePhoto._firebaseWrapped=true;
+  }
+  function wrapDamage(){
+    if(typeof window.saveDamageInBackground!=='function'||window.saveDamageInBackground._firebaseWrapped)return;
+    const original=window.saveDamageInBackground;
+    window.saveDamageInBackground=async function(upload){
+      if(!cloudReady())return original.apply(this,arguments);
+      if(DAMAGE_UPLOAD!==upload)return;upload.status='uploading';upload.attempts++;
+      try{
+        const damageId=crypto.randomUUID(),uploaded=await window.AAXI_FIREBASE.uploadDataUrl(upload.inspectionId,upload.image,'damage_'+damageId+'.jpg',{part:String(upload.part),severity:String(upload.severity)});
+        await window.AAXI_FIREBASE.registerDamage(upload.inspectionId,{damageId,part:upload.part,severity:upload.severity,notes:'',storagePath:uploaded.path});
+        const cloud=await window.AAXI_FIREBASE.getInspection(upload.inspectionId);
+        if(DAMAGE_UPLOAD!==upload)return;upload.status='saved';upload.waiters.splice(0).forEach(x=>x.ok());DAMAGE_UPLOAD=null;
+        const input=document.getElementById('damagePhoto');if(input)input.value='';if(CURRENT&&currentInspectionId()===upload.inspectionId)preserveAndRender(cloud);
+      }catch(error){report(error);if(DAMAGE_UPLOAD!==upload)return;if(upload.attempts<3)return setTimeout(()=>window.saveDamageInBackground(upload),upload.attempts*700);damageUploadFailed(upload,error)}
+    };
+    window.saveDamageInBackground._firebaseWrapped=true;
+  }
+  function wrapFinish(){
+    if(typeof window.finishInspection!=='function'||window.finishInspection._firebaseWrapped)return;
+    const original=window.finishInspection;
+    window.finishInspection=function(){
+      if(!cloudReady())return original.apply(this,arguments);
+      if(FINISHING||!CURRENT)return;
+      const button=document.getElementById('finishBtn'),snapshot=CURRENT,draft=CURRENT.locationDraft||{},vanId=String(snapshot.inspection.VanID),before={completedVanIds:[...(DATA.completedVanIds||[])],completedToday:[...(DATA.completedToday||[])],inProgress:[...(DATA.inProgress||[])],checklist:{...(DATA.checklist||{})},stats:{...(DATA.stats||{})}};
+      const station=String(draft.station||document.getElementById('vanLocation').value),spot=station==='SHOP'?'':String(draft.spot||document.getElementById('spot').selectedOptions?.[0]?.textContent||''),status=document.getElementById('vanStatus').value,notes=document.getElementById('inspectionNotes').value;
+      setFinishBusy(true);
+      const placeholder={...snapshot.inspection,Station:station,Spot:spot,Status:status,InspectionState:'Completed',CompletedAt:new Date().toISOString(),Notes:notes};
+      if(!(DATA.completedVanIds||[]).map(String).includes(vanId))DATA.completedVanIds=[...(DATA.completedVanIds||[]),vanId];
+      DATA.completedToday=[placeholder,...(DATA.completedToday||[]).filter(x=>String(x.VanID)!==vanId)];DATA.inProgress=(DATA.inProgress||[]).filter(x=>String(x.VanID)!==vanId);
+      if(DATA.checklist){DATA.checklist.inspectionsCompleted=Math.min(Number(DATA.checklist.inspectionsTotal||0),Number(DATA.checklist.inspectionsCompleted||0)+1);DATA.checklist.inspectionsReady=DATA.checklist.inspectionsCompleted>=Number(DATA.checklist.inspectionsTotal||0);DATA.checklist.allReady=!!DATA.checklist.inspectionsReady&&!!DATA.checklist.rescuesReady&&!!DATA.checklist.pickupReady&&!!DATA.checklist.returnedPackagesReady&&!!DATA.checklist.routesTomorrowReady}
+      if(DATA.stats){DATA.stats.completed=Number(DATA.stats.completed||0)+1;DATA.stats.pending=Math.max(0,Number(DATA.stats.pending||0)-1)}
+      const recover=error=>{DATA.completedVanIds=before.completedVanIds;DATA.completedToday=before.completedToday;DATA.inProgress=before.inProgress;DATA.checklist=before.checklist;DATA.stats=before.stats;CURRENT=snapshot;setFinishBusy(false);renderInspection(CURRENT);renderAll();showPage('inspection');toast('Inspection was not saved. '+(error.message||String(error)),true)};
+      claimCurrentInspection(()=>{
+        const inspectionId=currentInspectionId();if(!inspectionId)return recover(new Error('Inspection could not be started.'));
+        quickActionDelay(button,()=>{FINISHING=false;renderAll();showPage('pending')},'Finishing…');
+        afterDamageUpload(inspectionId,async()=>{
+          try{
+            const result=await window.AAXI_FIREBASE.finish({inspectionId,vanId,station,spot,status,notes,damageFound:DAMAGE_ANSWER==='Yes'});
+            stopCloudLock();CURRENT=null;DAMAGE_ANSWER='';setFinishBusy(false);
+            if(result&&result.van)DATA.vans=(DATA.vans||[]).map(v=>String(v.VanID)===vanId?{...v,CurrentStation:result.van.currentStation||station,CurrentSpot:result.van.currentSpot||spot,CurrentStatus:result.van.currentStatus||status}:v);
+            saveAppCache(DATA);renderAll();
+          }catch(error){recover(error)}
+        },recover);
+      },recover);
+    };
+    window.finishInspection._firebaseWrapped=true;
+  }
+  function stopCloudLock(){
+    const integration=window.AAXI_FIREBASE_INTEGRATION,state=integration&&integration.STATE;if(!state)return;
+    if(state.heartbeat)clearInterval(state.heartbeat);state.heartbeat=null;state.currentLock=null;
+  }
+  function install(){wrapPhotos();wrapDamage();wrapFinish()}
+  document.addEventListener('DOMContentLoaded',()=>setTimeout(install,20));
+  window.AAXI_FIREBASE_INSPECTION_OVERRIDES={install,toUiInspection};
+})();
+</script>

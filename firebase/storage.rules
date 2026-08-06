@@ -1,0 +1,15 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() { return request.auth != null; }
+    function activeUser() {
+      return signedIn() && firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.active == true;
+    }
+    match /inspection-photos/{inspectionId}/{fileName} {
+      allow read: if activeUser();
+      allow write: if activeUser()
+        && request.resource.size < 8 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+  }
+}

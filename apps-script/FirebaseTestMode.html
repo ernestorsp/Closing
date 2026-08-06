@@ -1,0 +1,54 @@
+<script>
+(function(){
+  'use strict';
+  const TEST_EMAIL='santiagopiedrae@gmail.com';
+  const normalized=value=>String(value||'').trim().toLowerCase();
+  function isTester(email){return normalized(email)===TEST_EMAIL}
+  function setForEmail(email){
+    if(!window.AAXI_FIREBASE||!isTester(email))return false;
+    window.AAXI_FIREBASE.setEnabled(true);
+    return true;
+  }
+  function bindLogin(){
+    const form=document.getElementById('loginForm');
+    if(!form||form.dataset.firebaseTestBound==='1')return;
+    form.dataset.firebaseTestBound='1';
+    const emailInput=form.elements.email;
+    if(emailInput){
+      emailInput.addEventListener('input',()=>setForEmail(emailInput.value),true);
+      emailInput.addEventListener('change',()=>setForEmail(emailInput.value),true);
+      setForEmail(emailInput.value);
+    }
+    form.addEventListener('pointerdown',()=>setForEmail(emailInput&&emailInput.value),true);
+    form.addEventListener('submit',()=>setForEmail(emailInput&&emailInput.value),true);
+  }
+  function showBadge(){
+    if(!window.DATA||!DATA.user||!isTester(DATA.user.email)||!window.AAXI_FIREBASE?.enabled())return;
+    const header=document.querySelector('#app header > div:first-child');
+    if(!header||document.getElementById('firebaseTestBadge'))return;
+    const badge=document.createElement('small');
+    badge.id='firebaseTestBadge';
+    badge.textContent=' · Firebase test';
+    badge.title='Inspections are using Firebase for this browser.';
+    badge.style.cssText='margin-left:6px;font-weight:700;opacity:.8';
+    header.appendChild(badge);
+  }
+  async function refreshAfterLogin(){
+    if(!window.AAXI_FIREBASE?.enabled()||!window.AAXI_FIREBASE.auth.currentUser)return;
+    showBadge();
+    try{await window.AAXI_FIREBASE_BOOTSTRAP?.refresh(true)}catch(error){console.error('[Firebase test refresh]',error)}
+  }
+  document.addEventListener('DOMContentLoaded',()=>{
+    bindLogin();
+    setInterval(()=>{bindLogin();showBadge()},1500);
+    window.AAXI_FIREBASE?.onAuthChanged(user=>{if(user)setTimeout(refreshAfterLogin,300)});
+  });
+  window.AAXI_FIREBASE_TEST={
+    email:TEST_EMAIL,
+    enabled:()=>!!window.AAXI_FIREBASE?.enabled(),
+    enable:()=>window.AAXI_FIREBASE?.setEnabled(true),
+    disable:async()=>{window.AAXI_FIREBASE?.setEnabled(false);try{await window.AAXI_FIREBASE?.signOut()}catch(_error){};location.reload()},
+    refresh:refreshAfterLogin
+  };
+})();
+</script>

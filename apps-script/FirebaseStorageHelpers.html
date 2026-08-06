@@ -1,0 +1,20 @@
+<script>
+(function(){
+  'use strict';
+  function install(){
+    if(!window.AAXI_FIREBASE||!window.AAXI_FIREBASE.storage)return false;
+    if(typeof window.AAXI_FIREBASE.storageUrl!=='function'){
+      window.AAXI_FIREBASE.storageUrl=async function(path){
+        const value=String(path||'').trim();
+        if(!value)return'';
+        return window.AAXI_FIREBASE.storage.ref(value).getDownloadURL();
+      };
+    }
+    return true;
+  }
+  if(!install()){
+    const timer=setInterval(()=>{if(install())clearInterval(timer)},100);
+    setTimeout(()=>clearInterval(timer),10000);
+  }
+})();
+</script>
