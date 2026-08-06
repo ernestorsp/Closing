@@ -109,7 +109,123 @@ function closingEmailHtml_(station,date,data,rescues,notes,photoCount,fleet,send
 }
 function closingNotesPhotoFolder_(){const rootName='Closing Notes Photos',it=DriveApp.getFoldersByName(rootName);return it.hasNext()?it.next():DriveApp.createFolder(rootName)}
 function saveClosingNotePhotos_(photos,station,date){if(!Array.isArray(photos)||!photos.length)return[];if(photos.length>6)throw new Error('You can attach up to 6 photos.');const root=closingNotesPhotoFolder_(),dateFolder=folder_(root,date),stationFolder=folder_(dateFolder,station);return photos.map((p,i)=>{const data=String(p.data||''),match=data.match(/^data:(image\/(?:jpeg|jpg|png));base64,/);if(!match)throw new Error('Photo '+(i+1)+' is invalid.');const ext=match[1].includes('png')?'png':'jpg',name=String(p.name||('closing_photo_'+(i+1)+'.'+ext)).replace(/[^\w.\-]+/g,'_'),blob=Utilities.newBlob(Utilities.base64Decode(data.split(',')[1]),match[1],name),file=stationFolder.createFile(blob);return{file,blob:file.getBlob().setName(name)}})}
-function sendClosingNotes(token,input){const s=auth_(token);return lock_(()=>{const ss=db_(),u=user_(s.email),station=workingStation_(u);ensureClosingSheets_(ss);const ready=closingReadiness_(ss,station);if(!ready.allReady)throw new Error('All closing checklist items must be Ready before sending notes.');const notes=String(input&&input.notes||'').trim();if(!notes)throw new Error('Write the closing notes before sending.');const date=day_(),key=date+'_'+station,data=closingRecord_(ss,date,station);if(!data)throw new Error('Save today’s Closing data first.');const recipients=closingEmailRecipients_(ss,s.email),photos=saveClosingNotePhotos_(input&&input.photos,station,date),rescues=rescueData_(ss,station).rescues.filter(x=>x.Status==='Saved'),fleet=fleetEmailData_(ss,station),photoBaseUrl=ScriptApp.getService().getUrl();if(!photoBaseUrl)throw new Error('Deploy the project as a Web App before sending Closing Notes.');fleet.defects.forEach(v=>v.defects.forEach(d=>{d.photoViewUrl=d.photoFileId?photoBaseUrl+'?closingPhoto='+encodeURIComponent(closingPhotoToken_(d.photoFileId)):''}));const displayDate=Utilities.formatDate(new Date(),'America/New_York','EEEE, MM-dd-yyyy'),subject=station+' - Closing Notes - '+displayDate,htmlBody=closingEmailHtml_(station,displayDate,data,rescues,notes,photos.length,fleet,u.Name||s.email);if(MailApp.getRemainingDailyQuota()<recipients.length)throw new Error('Not enough email quota remains to send Closing Notes today.');MailApp.sendEmail({to:recipients.join(','),subject,body:station+' Closing Notes for '+displayDate+'\n\n'+notes,htmlBody,attachments:photos.map(x=>x.blob),name:(u.Name||'AAXI Closing')+' · '+s.email,replyTo:s.email});const existing=closingNote_(ss,date,station),record={NoteKey:key,NoteID:(existing||{}).NoteID||Utilities.getUuid(),NoteDate:date,Station:station,Notes:notes,PhotoFileIDs:photos.map(x=>x.file.getId()).join(' | '),PhotoFileURLs:photos.map(x=>x.file.getUrl()).join(' | '),PhotoCount:photos.length,EmailRecipients:recipients.join(', '),EmailSubject:subject,SentAt:new Date(),SentByEmail:s.email,SentByName:u.Name};upsertObject_(ss.getSheetByName(APP.SHEETS.closingNotes),'NoteKey',key,record);audit_(s.email,'SEND_CLOSING_NOTES','CLOSING_NOTES',key,station+' -> '+recipients.join(', '));return{ok:true,record,message:'Closing notes emailed to '+recipients.length+' recipient'+(recipients.length===1?'':'s')+'.'}})}
+function sendClosingNotes(token,input){
+  const s=auth_(token);
+  return lock_(()=>{
+    const ss=db_(),
+      u=user_(s.email),
+      station=workingStation_(u);
+
+    ensureClosingSheets_(ss);
+
+    const ready=closingReadiness_(ss,station);
+    if(!ready.allReady){
+      throw new Error('All closing checklist items must be Ready before sending notes.');
+    }
+
+    const notes=String(input&&input.notes||'').trim();
+    if(!notes){
+      throw new Error('Write the closing notes before sending.');
+    }
+
+    const today=day_();
+    const data=closingRecord_(ss,today,station);
+
+    if(!data){
+      throw new Error('Save today’s Closing data first.');
+    }
+
+    const date=storedDay_(data.RecordDate)||today;
+    const key=date+'_'+station;
+
+    const recipients=closingEmailRecipients_(ss,s.email),
+      photos=saveClosingNotePhotos_(input&&input.photos,station,date),
+      rescues=rescueData_(ss,station).rescues.filter(x=>x.Status==='Saved'),
+      fleet=fleetEmailData_(ss,station),
+      photoBaseUrl=ScriptApp.getService().getUrl();
+
+    if(!photoBaseUrl){
+      throw new Error('Deploy the project as a Web App before sending Closing Notes.');
+    }
+
+    fleet.defects.forEach(v=>v.defects.forEach(d=>{
+      d.photoViewUrl=d.photoFileId
+        ?photoBaseUrl+'?closingPhoto='+encodeURIComponent(closingPhotoToken_(d.photoFileId))
+        :'';
+    }));
+
+    const displayDate=Utilities.formatDate(
+      new Date(date+'T12:00:00'),
+      'America/New_York',
+      'EEEE, MM-dd-yyyy'
+    );
+
+    const subject=station+' - Closing Notes - '+displayDate,
+      htmlBody=closingEmailHtml_(
+        station,
+        displayDate,
+        data,
+        rescues,
+        notes,
+        photos.length,
+        fleet,
+        u.Name||s.email
+      );
+
+    if(MailApp.getRemainingDailyQuota()<recipients.length){
+      throw new Error('Not enough email quota remains to send Closing Notes today.');
+    }
+
+    MailApp.sendEmail({
+      to:recipients.join(','),
+      subject,
+      body:station+' Closing Notes for '+displayDate+'\n\n'+notes,
+      htmlBody,
+      attachments:photos.map(x=>x.blob),
+      name:(u.Name||'AAXI Closing')+' · '+s.email,
+      replyTo:s.email
+    });
+
+    const existing=closingNote_(ss,date,station),
+      record={
+        NoteKey:key,
+        NoteID:(existing||{}).NoteID||Utilities.getUuid(),
+        NoteDate:date,
+        Station:station,
+        Notes:notes,
+        PhotoFileIDs:photos.map(x=>x.file.getId()).join(' | '),
+        PhotoFileURLs:photos.map(x=>x.file.getUrl()).join(' | '),
+        PhotoCount:photos.length,
+        EmailRecipients:recipients.join(', '),
+        EmailSubject:subject,
+        SentAt:new Date(),
+        SentByEmail:s.email,
+        SentByName:u.Name
+      };
+
+    upsertObject_(
+      ss.getSheetByName(APP.SHEETS.closingNotes),
+      'NoteKey',
+      key,
+      record
+    );
+
+    audit_(
+      s.email,
+      'SEND_CLOSING_NOTES',
+      'CLOSING_NOTES',
+      key,
+      station+' -> '+recipients.join(', ')
+    );
+
+    return{
+      ok:true,
+      record,
+      message:'Closing notes emailed to '+recipients.length+
+        ' recipient'+(recipients.length===1?'':'s')+'.'
+    };
+  });
+}
 function setWorkingStation(token,station){const s=auth_(token),u=user_(s.email);if(!APP.WORK_STATIONS.includes(station)||!allowedStations_(u).includes(station))throw new Error('You do not have access to that station.');update_(db_().getSheetByName(APP.SHEETS.users),'Email',s.email,{DefaultStation:station,UpdatedAt:new Date()});audit_(s.email,'CHANGE_STATION','USER',s.email,station);return{ok:true}}
 function startInspection(token,input){const s=auth_(token);return lock_(()=>{const ss=db_();expireOldInspections_(ss);const van=find_(ss,APP.SHEETS.vans,'VanID',input.vanId);if(!van||!yes_(van.Active))throw new Error('Van not found.');const existing=rowsTail_(ss.getSheetByName(APP.SHEETS.inspections),1200).find(x=>String(x.VanID)===String(van.VanID)&&x.InspectionState==='In Progress'&&storedDay_(x.InspectionDate||x.StartedAt)===day_());if(existing){if(norm_(existing.UserEmail)===norm_(s.email))return inspectionData_(ss,existing.InspectionID,s.email);throw new Error('This van is being inspected by another user.');}const u=user_(s.email),workingStation=workingStation_(u),station=van.CurrentStation||workingStation,spot=station==='SHOP'?'SHOP':van.CurrentSpot||'',id=Utilities.getUuid();append_(ss.getSheetByName(APP.SHEETS.inspections),{InspectionID:id,InspectionDate:day_(),StartedAt:new Date(),UserEmail:s.email,UserName:u.Name,WorkingStation:workingStation,VanID:van.VanID,VanNumber:van.VanNumber,PreviousStation:station,Station:station,PreviousSpot:spot,Spot:spot,PreviousStatus:van.CurrentStatus||'',Status:van.CurrentStatus||'Operational',LocationChanged:false,PhotoProgress:'0/6',InspectionState:'In Progress'});audit_(s.email,'START_INSPECTION','INSPECTION',id,'Van '+van.VanNumber);return inspectionData_(ss,id,s.email)})}
 function skipGroundedInspection(token,vanId){const s=auth_(token);return lock_(()=>{const ss=db_();expireOldInspections_(ss);const van=find_(ss,APP.SHEETS.vans,'VanID',vanId);if(!van||!yes_(van.Active))throw new Error('Van not found.');if(van.CurrentStatus!=='Grounded')throw new Error('Only grounded vans can be completed without inspection.');const all=rows_(ss.getSheetByName(APP.SHEETS.inspections));if(all.some(x=>String(x.VanID)===String(van.VanID)&&x.InspectionState==='In Progress'))throw new Error('This van already has an inspection in progress. Continue that inspection instead.');if(all.some(x=>String(x.VanID)===String(van.VanID)&&x.InspectionState==='Completed'&&dateKey_(x.CompletedAt)===day_()))return{ok:true,message:'Grounded van was already completed today.'};const u=user_(s.email),now=new Date(),workingStation=workingStation_(u),station=van.CurrentStation||workingStation,id=Utilities.getUuid();append_(ss.getSheetByName(APP.SHEETS.inspections),{InspectionID:id,InspectionDate:day_(),StartedAt:now,CompletedAt:now,DurationMinutes:0,UserEmail:s.email,UserName:u.Name,WorkingStation:workingStation,VanID:van.VanID,VanNumber:van.VanNumber,PreviousStation:station,Station:station,PreviousSpot:van.CurrentSpot||'',Spot:van.CurrentSpot||'',PreviousStatus:'Grounded',Status:'Grounded',LocationChanged:false,PhotoProgress:'0/6',InspectionState:'Completed',Notes:'Grounded van - inspection not required.'});update_(ss.getSheetByName(APP.SHEETS.vans),'VanID',van.VanID,{LastInspectionAt:now,LastInspectionID:id,UpdatedAt:now});audit_(s.email,'SKIP_GROUNDED_INSPECTION','INSPECTION',id,'Van '+van.VanNumber);return{ok:true,message:'Grounded van completed without inspection.'}})}
