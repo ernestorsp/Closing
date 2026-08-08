@@ -1,0 +1,18 @@
+{
+  "name": "aaxi-closing-migration-scripts",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "bootstrap-admin": "node bootstrap-admin.mjs",
+    "import": "node import-firestore-export.mjs",
+    "import:media": "node import-photo-archives.mjs",
+    "send:password-links": "node send-password-reset-links.mjs"
+  },
+  "dependencies": {
+    "adm-zip": "^0.6.0",
+    "firebase-admin": "^14.2.0"
+  },
+  "overrides": {
+    "uuid": "^11.1.1"
+  }
+}

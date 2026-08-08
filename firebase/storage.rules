@@ -1,0 +1,27 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() { return request.auth != null; }
+    function activeUser() {
+      return signedIn()
+        && (firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.Active == true
+          || firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.active == true);
+    }
+    function validImage() {
+      return request.resource.size < 8 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*')
+        && request.resource.metadata.uploadedByUid == request.auth.uid;
+    }
+    match /inspection-photos/{inspectionId}/{fileName} {
+      allow read: if activeUser();
+      allow create, update: if activeUser() && validImage();
+      allow delete: if false;
+    }
+    match /closing-notes/{date}/{station}/{fileName} {
+      allow read: if activeUser();
+      allow create, update: if activeUser() && validImage();
+      allow delete: if false;
+    }
+    match /{allPaths=**} { allow read, write: if false; }
+  }
+}

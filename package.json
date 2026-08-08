@@ -2,6 +2,9 @@
   "name": "aaxi-closing",
   "private": true,
   "scripts": {
-    "test": "node --test tests/*.test.js"
+    "build:web": "node web/build.mjs",
+    "pretest": "npm run build:web",
+    "test": "node --test tests/*.test.js tests/*.test.mjs && npm --prefix cloud-run-api test",
+    "check": "npm run build:web && npm --prefix cloud-run-api run check"
   }
 }

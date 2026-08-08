@@ -1,0 +1,144 @@
+<script src="https://www.gstatic.com/firebasejs/12.1.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/12.1.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/12.1.0/firebase-storage-compat.js"></script>
+<script>
+(function(){
+  'use strict';
+  const DEFAULT_CONFIG={
+    apiKey:'AIzaSyCtc1vuIVnEH93CWqmVr8JDFPQP7YRlNZs',
+    authDomain:'aaxi-closing.firebaseapp.com',
+    projectId:'aaxi-closing',
+    storageBucket:'aaxi-closing.firebasestorage.app',
+    messagingSenderId:'263781869863',
+    appId:'1:263781869863:web:daeff766d19dc6ff1d6102'
+  };
+  const configured=window.CLOSING_FIREBASE_CONFIG||{};
+  const FIREBASE_CONFIG=Object.assign({},DEFAULT_CONFIG,configured.firebase||{});
+  const API_URL=String(configured.apiUrl||'https://aaxi-closing-api-lexfqgdyea-ue.a.run.app').replace(/\/$/,'');
+  const firebaseApp=firebase.apps.length?firebase.app():firebase.initializeApp(FIREBASE_CONFIG);
+  const auth=firebase.auth(firebaseApp);
+  const storage=firebase.storage(firebaseApp);
+  auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(console.error);
+
+  let authResolved=false;
+  let resolveAuth;
+  const authReady=new Promise(resolve=>{resolveAuth=resolve});
+  auth.onAuthStateChanged(user=>{if(!authResolved){authResolved=true;resolveAuth(user||null)}});
+
+  function appError(message,code,status,details){
+    const error=new Error((code?code+': ':'')+(message||'Request failed.'));
+    error.code=code||'UNKNOWN';error.status=status||0;error.details=details||null;return error;
+  }
+  async function currentUser(){
+    await authReady;
+    const user=auth.currentUser;
+    if(!user)throw appError('AUTH_REQUIRED: Firebase sign-in is required.','AUTH_REQUIRED',401);
+    return user;
+  }
+  async function request(path,options){
+    options=options||{};
+    const user=await currentUser(),controller=new AbortController(),timeout=Number(options.timeout||30000),timer=setTimeout(()=>controller.abort(),timeout);
+    try{
+      const response=await fetch(API_URL+path,{method:options.method||'POST',signal:controller.signal,headers:{authorization:'Bearer '+await user.getIdToken(),...(options.body===undefined?{}:{'content-type':'application/json'}),...(options.requestId?{'x-request-id':options.requestId}:{})},body:options.body===undefined?undefined:JSON.stringify(options.body)});
+      const data=await response.json().catch(()=>null);
+      if(!response.ok||data&&data.ok===false){const value=data&&data.error||{};throw appError(value.message||'Cloud request failed.',value.code||'HTTP_ERROR',response.status,value.details)}
+      return data;
+    }catch(error){
+      if(error&&error.name==='AbortError')throw appError('The request timed out and will retry automatically.','TIMEOUT');
+      if(error&&error.code)throw error;
+      throw appError(error&&error.message||'Network request failed.','NETWORK_ERROR');
+    }finally{clearTimeout(timer)}
+  }
+  async function rpc(method,args,timeout){
+    const response=await request('/v1/rpc/'+encodeURIComponent(method),{body:{args:args||[]},timeout:timeout||30000});
+    return response&&response.result;
+  }
+  function dataUrlBlob(dataUrl){
+    const match=String(dataUrl||'').match(/^data:([^;]+);base64,(.+)$/);
+    if(!match)throw appError('Invalid image data.','INVALID_IMAGE');
+    const binary=atob(match[2]),bytes=new Uint8Array(binary.length);for(let i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);
+    return new Blob([bytes],{type:match[1]});
+  }
+  function safeFile(value){return String(value||'photo').replace(/[^A-Za-z0-9._-]/g,'_').slice(0,180)}
+  async function uploadDataUrl(path,dataUrl){
+    const blob=dataUrlBlob(dataUrl),reference=storage.ref(path),snapshot=await reference.put(blob,{contentType:blob.type,customMetadata:{uploadedByUid:(await currentUser()).uid}});
+    return{storagePath:path,contentType:blob.type,size:Number(snapshot.totalBytes||blob.size||0)};
+  }
+  async function prepareOperation(source){
+    const operation=JSON.parse(JSON.stringify(source||{})),payload=operation.payload||{};
+    if(['SAVE_INSPECTION_PHOTO','SAVE_DAMAGE'].includes(operation.type)&&payload.image){
+      const inspectionId=safeFile(payload.inspectionId),suffix=operation.type==='SAVE_DAMAGE'?'damage':'photo';
+      const uploaded=await uploadDataUrl('inspection-photos/'+inspectionId+'/'+suffix+'_'+safeFile(operation.id)+'.jpg',payload.image);
+      delete payload.image;Object.assign(payload,uploaded);
+    }
+    if(operation.type==='SEND_NOTES'&&Array.isArray(payload.photos)&&payload.photos.length){
+      const paths=[];
+      for(let index=0;index<payload.photos.length;index++){
+        const photo=payload.photos[index]||{},extension=String(photo.data||'').startsWith('data:image/png')?'png':'jpg';
+        const path='closing-notes/'+safeFile(operation.day)+'/'+safeFile(operation.station)+'/'+safeFile(operation.id)+'_'+(index+1)+'.'+extension;
+        await uploadDataUrl(path,photo.data);paths.push(path);
+      }
+      delete payload.photos;payload.photoPaths=paths;
+    }
+    operation.payload=payload;return operation;
+  }
+  async function syncApply(operation){
+    const prepared=await prepareOperation(operation);
+    return request('/v1/sync/apply',{body:{operation:prepared},requestId:prepared.id,timeout:['SAVE_INSPECTION_PHOTO','SAVE_DAMAGE','SEND_NOTES'].includes(prepared.type)?120000:75000});
+  }
+  function blobDataUrl(blob){return new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result));reader.onerror=()=>reject(appError('Photo could not be read.','PHOTO_READ_FAILED'));reader.readAsDataURL(blob)})}
+  async function storageImage(path){
+    if(!path)throw appError('Photo not found.','PHOTO_NOT_FOUND',404);
+    const url=await storage.ref(path).getDownloadURL(),response=await fetch(url);
+    if(!response.ok)throw appError('Photo could not be downloaded.','PHOTO_DOWNLOAD_FAILED',response.status);
+    return blobDataUrl(await response.blob());
+  }
+
+  const TOKEN_METHODS=new Set([
+    'acknowledgeAvatarMessage','changePassword','createUserInvitation','finishInspection','getAdminData','getAppData','getAvailableSpots','getAvatarAdminData','getAvatarMessages','getCompletedInspection','getEditableInspection','getInspection','getInspectionPhoto','getInspectionSkipAdmins','getLocalFirstMetadata','getPreviousPhoto','getVanHistory','importDriversFile','importVansFile','removeManagedUser','removeManagedVan','reopenDailyRescues','requestInspectionSkipSelected','saveDailyClosing','saveDailyRescuesBatch','saveDamageReport','saveInspectionPhoto','sendAvatarMessage','sendClosingNotes','setPreferredLanguage','setWorkingStation','skipGroundedInspection','startInspection','syncApplyOperation','updateManagedUser'
+  ]);
+
+  async function call(method,args){
+    if(method==='login'){
+      const credential=await auth.signInWithEmailAndPassword(String(args[0]||'').trim(),String(args[1]||''));
+      try{await rpc('getAppData',[false],30000)}catch(error){await auth.signOut();throw error}
+      return{token:'firebase',mustChange:false,email:credential.user.email};
+    }
+    if(method==='logout'){await auth.signOut();return true}
+    if(method==='requestPasswordReset'){
+      await auth.sendPasswordResetEmail(String(args[0]||'').trim(),{url:location.origin});
+      return{ok:true,firebaseLink:true,message:'A password reset link was sent to your email.'};
+    }
+    if(method==='resetPasswordWithCode')throw appError('Use the secure password-reset link sent to your email.','RESET_LINK_REQUIRED',400);
+    if(method==='acceptUserInvitation')throw appError('Use the CREATE PASSWORD link in the Firebase invitation email.','INVITATION_LINK_REQUIRED',400);
+    if(method==='changePassword'){
+      const user=await currentUser(),current=String(args[1]||''),next=String(args[2]||'');
+      if(next.length<6)throw appError('Password must have at least 6 characters.','INVALID_PASSWORD',400);
+      await user.reauthenticateWithCredential(firebase.auth.EmailAuthProvider.credential(user.email,current));
+      await user.updatePassword(next);return{ok:true};
+    }
+    const values=TOKEN_METHODS.has(method)?args.slice(1):args;
+    if(method==='syncApplyOperation')return syncApply(values[0]);
+    if(method==='getInspectionPhoto'||method==='getPreviousPhoto'){
+      const result=await rpc(method,values,45000);
+      if(result&&result.storagePath)result.image=await storageImage(result.storagePath);
+      return result;
+    }
+    return rpc(method,values,['importDriversFile','importVansFile'].includes(method)?120000:30000);
+  }
+
+  function chain(state){
+    let proxy;
+    proxy=new Proxy({}, {get(_target,name){
+      if(name==='withSuccessHandler')return callback=>{state.success=callback;return proxy};
+      if(name==='withFailureHandler')return callback=>{state.failure=callback;return proxy};
+      if(name==='withUserObject')return object=>{state.userObject=object;return proxy};
+      return function(){const args=[...arguments];Promise.resolve().then(()=>call(String(name),args)).then(value=>{if(state.success)state.success(value,state.userObject)}).catch(error=>{if(state.failure)state.failure(error,state.userObject);else console.error('[Firebase RPC]',error)})};
+    }});
+    return proxy;
+  }
+  window.google=window.google||{};window.google.script=window.google.script||{};
+  Object.defineProperty(window.google.script,'run',{configurable:false,get:function(){return chain({success:null,failure:null,userObject:null})}});
+  window.AAXI_FIREBASE={app:firebaseApp,auth,storage,apiUrl:API_URL,request,rpc,syncApply,storageImage,authReady};
+})();
+</script>

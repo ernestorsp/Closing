@@ -1,77 +1,52 @@
 # AAXI Closing
 
-Mobile-first Google Apps Script web app for daily van closing inspections.
+Production-oriented, mobile-first van inspection and Closing application.
 
-## Included
+## Production architecture
 
-- User-selected working station remembered per account
-- Pending and completed inspection lists
-- Optional inspection photos captured locally and uploaded in the background
-- Previous photo comparison by van and photo position
-- New vs. existing damage tracking
-- Unique spot reservation for DJX3 and DJX4
-- SHOP location without numbered spots
-- Location-change confirmation
-- Operational, Downed, and Grounded statuses
-- Inspection history and audit log
-- Daily rescues saved in one batch
-- Daily closing data with automatic van-status counts
-- Closing notes can be sent with available data after confirming a pending-items warning
-- Persistent local-first outbox with automatic retries, idempotency, and foreground/connectivity sync
-- Searchable Inspected Vans page for correcting completed inspections; Closing and Rescue remain editable in their own sections
-- Conflict detection and audit details for concurrent edits
-- HTML Closing Notes email with table formatting and up to six photo attachments
-- Closing Notes fleet sections listing Operational vans, Downed/Grounded vans with their status notes, and station-owned vans currently at SHOP
-- Late RTS driver lists grouped with the current station first, followed by the other station
-- Admin email approval workflow for skipping the remaining daily inspections
-- Admin-only History and Update pages with server-side permission checks
-- Driver roster imports for DJX3/DJX4 from AssociateData CSV files
-- Combined DJX3/DJX4 vehicle imports from VehiclesData XLSX or CSV files
-- Email invitation links with role and station-access selection
-- Admin user list with permission changes and access removal
-- Email verification codes for forgotten-password recovery
-- In-app loading screen while an existing session is validated
+- Firebase Hosting serves the current CLOSING interface.
+- Firebase Authentication manages sign-in, password reset and invitations.
+- Firestore is the source of truth for vans, spots, inspections, Rescue, Closing, notes, users, audit and synchronization operations.
+- Cloud Storage holds inspection, damage and Closing Notes photos.
+- Cloud Run validates requests, performs Firestore transactions, prevents duplicate operations and sends email.
+- IndexedDB keeps the device-first outbox so temporary network failures do not block or erase work.
 
-## Google Sheet
+The Firebase build has no Apps Script fallback, dual write, customer-visible pending/retry status or Firebase test switch. The Sync now button remains optional and only shows progress after the user presses it.
 
-The app expects these tabs: CONFIG, USERS, VANS, SPOTS, INSPECTIONS, PHOTOS, DAMAGES, AUDIT_LOG, LISTS, RESCUE_DRIVERS, RESCUES, DAILY_RESCUE_DRIVERS, RESCUES DJX3, RESCUES DJX4, DAILY_CLOSING, CLOSING_NOTES, and INSPECTION_SKIP_REQUESTS. `USER_INVITATIONS`, `PASSWORD_RESET_REQUESTS`, `SYNC_OPERATIONS`, and `SYNC_METADATA` are created automatically.
+## Current application behavior
 
-Populate VANS and SPOTS before operational use. SHOP must not be added to SPOTS.
+- Immediate local acceptance for Inspect, Finish, Closing, Rescue, notes and completed-inspection edits.
+- Persistent automatic retries with stable operation IDs.
+- Optional inspection photos and damage photos uploaded in the background.
+- Searchable Inspected Vans page with the full inspection fields, damage workflow and optional photos.
+- Closing and Rescue edit in their own sections.
+- Warning-only Closing Notes readiness checks.
+- Firestore transactions for van, spot, Closing, Rescue and completed-inspection conflicts.
+- Audit events for controlled edits.
+- DJX4 Closing omits Drivers with Receipts.
+- Empty DVIC is N/A in Closing Notes email.
+- DJX3 spot data, including F-1 through F-6, is imported from the current Sheet.
 
-Add `CLOSING_EMAIL_RECIPIENTS` to CONFIG to send Closing Notes to management. Put multiple email addresses in Value separated by commas. If this setting is blank or missing, the email is sent to the signed-in user.
+## Development
 
-## Apps Script setup
+Build the static Firebase Hosting application:
 
-1. Create an Apps Script project attached to the CLOSING spreadsheet.
-2. Copy all files from `apps-script/`.
-3. In **Project Settings → Script Properties**, add:
-   - `CLOSING_SPREADSHEET_ID`: the private ID of the CLOSING spreadsheet.
-   - `INITIAL_ADMIN_PASSWORD`: a temporary password with at least six characters.
-4. Run `setupClosingApp` once and authorize it.
-5. Deploy as a web app using the access level approved for your operation.
-6. Paste the resulting `/exec` URL into `WEB_APP_URL` in the root `index.html`.
-7. Enable GitHub Pages from the main branch.
+    npm run build:web
 
-Do not commit the spreadsheet ID, passwords, session tokens, or deployment secrets to this public repository.
+Run all contract and Cloud API unit tests:
 
-## Local-first behavior
+    npm test
 
-Critical changes are accepted by the interface after they are persisted in IndexedDB. The outbox resumes automatically when connectivity returns, when the app returns to the foreground, and every 30 seconds while it is visible. Google Sheets operations use stable operation IDs; successful operations are recorded in `SYNC_OPERATIONS` so a retry does not duplicate them. Synced photo payloads are removed from the local outbox only after server confirmation.
+Run syntax checks and rebuild Hosting output:
 
-Automatic synchronization is intentionally silent in the customer interface. It does not display synced, syncing, pending, or review-required indicators. The optional **Sync now** button only shows feedback when the user explicitly presses it.
+    npm run check
 
-The web platform cannot continue Apps Script calls after the browser has fully terminated. Pending work survives that closure and resumes the next time the app opens.
+The Cloud Run service is in cloud-run-api. Firebase rules and Hosting configuration are in firebase.
 
-Run the local contract tests with `npm test` before deploying.
+## Migration and deployment
 
-## Initial data
+Follow migration/README.md. The cutover requires a fresh version 2 export from the current spreadsheet plus all generated photo archives.
 
-- USERS already contains the initial admin row in the Sheet.
-- `Admin` users can access every page, History, Update, invitations, and user management.
-- `Lead` users can access daily Closing functions but cannot access History or administration.
-- Station access for a user can be `DJX3`, `DJX4`, or `Both`.
-- Inspection skip requests are emailed to every active USERS row whose Role is `Admin`. The email contains private one-tap `YES — APPROVE` and `NO — DENY` links; the first response closes the request.
-- VANS requires one row per active van with a unique VanID.
-- SPOTS requires one active row per selectable DJX3 or DJX4 spot.
-- A spot can be occupied by only one van.
-- Abandoned reservations expire after 30 minutes.
+Existing Sheet password hashes are intentionally not copied. Firebase users receive password-creation links. The old Apps Script deployment must remain the sole writer until the Firebase rehearsal, count comparison, media import and concurrency tests pass; at cutover it must be retired so both systems never accept production writes simultaneously.
+
+Do not commit spreadsheet IDs, passwords, service-account keys, reset links, email API keys or deployment secrets.
