@@ -1,0 +1,120 @@
+<script>
+  (function (root) {
+    "use strict";
+
+    function operationId(prefix, now, random) {
+      const stamp = Number(now || Date.now()).toString(36);
+      const entropy = Math.floor(
+        (random == null ? Math.random() : random) * 0x100000000,
+      )
+        .toString(36)
+        .padStart(7, "0");
+      return String(prefix || "operation") + "_" + stamp + "_" + entropy;
+    }
+
+    function retryDelay(attempt, random) {
+      const count = Math.max(1, Number(attempt || 1));
+      const base = Math.min(300000, 1500 * Math.pow(2, Math.min(count - 1, 8)));
+      const jitter = 0.8 + 0.4 * (random == null ? Math.random() : random);
+      return Math.round(base * jitter);
+    }
+
+    function errorInfo(error) {
+      const message = String(
+        (error && error.message) || error || "Synchronization failed.",
+      );
+      const conflict = /\bCONFLICT\b|changed by another|newer version/i.test(
+        message,
+      );
+      const action =
+        conflict ||
+        /AUTH_REQUIRED|permission|required|invalid|not found|quota|\bselect\b|\bmust\b|no longer available|no longer editable|belongs to another/i.test(
+          message,
+        );
+      return {
+        message: message.replace(/^Error:\s*/, ""),
+        conflict,
+        requiresAction: action,
+      };
+    }
+
+    function pendingChecklist(checklist, photoLoading) {
+      const value = checklist || {};
+      const pending = [];
+      if (!value.inspectionsReady)
+        pending.push("vans without a completed inspection");
+      if (!value.rescuesReady) pending.push("Rescue not finalized");
+      if (!value.pickupReady) pending.push("Pick up not confirmed");
+      if (!value.returnedPackagesReady)
+        pending.push("returned packages not confirmed");
+      if (!value.routesTomorrowReady)
+        pending.push("tomorrow's routes not confirmed");
+      if (Number(photoLoading || 0) > 0)
+        pending.push("photos still being prepared or uploaded");
+      return pending;
+    }
+
+    function stableFingerprint(rows) {
+      const normalized = (Array.isArray(rows) ? rows : [])
+        .map(function (row) {
+          const source = row || {};
+          return Object.keys(source)
+            .sort()
+            .reduce(function (out, key) {
+              if (
+                !["UpdatedAt", "SavedAt", "CreatedAt", "Status"].includes(key)
+              )
+                out[key] = source[key];
+              return out;
+            }, {});
+        })
+        .sort(function (a, b) {
+          return JSON.stringify(a).localeCompare(JSON.stringify(b));
+        });
+      let hash = 2166136261;
+      const text = JSON.stringify(normalized);
+      for (let i = 0; i < text.length; i++) {
+        hash ^= text.charCodeAt(i);
+        hash = Math.imul(hash, 16777619);
+      }
+      return (hash >>> 0).toString(16).padStart(8, "0");
+    }
+
+    function createOperation(type, payload, options) {
+      const config = options || {};
+      const now = Number(config.now || Date.now());
+      return {
+        id:
+          config.id ||
+          operationId(
+            String(type || "operation").toLowerCase(),
+            now,
+            config.random,
+          ),
+        type: String(type || ""),
+        entityId: String(config.entityId || ""),
+        coalesceKey: String(config.coalesceKey || ""),
+        userEmail: String(config.userEmail || ""),
+        station: String(config.station || ""),
+        day: String(config.day || ""),
+        payload: payload || {},
+        status: "pending",
+        attempts: 0,
+        nextAttemptAt: now,
+        createdAt: now,
+        updatedAt: now,
+        lastError: "",
+        requiresAction: false,
+      };
+    }
+
+    root.ClosingSyncCore = {
+      operationId,
+      retryDelay,
+      errorInfo,
+      pendingChecklist,
+      stableFingerprint,
+      createOperation,
+    };
+  })(typeof window === "undefined" ? globalThis : window);
+</script>

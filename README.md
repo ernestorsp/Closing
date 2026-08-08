@@ -6,7 +6,7 @@ Mobile-first Google Apps Script web app for daily van closing inspections.
 
 - User-selected working station remembered per account
 - Pending and completed inspection lists
-- Six required camera photos
+- Optional inspection photos captured locally and uploaded in the background
 - Previous photo comparison by van and photo position
 - New vs. existing damage tracking
 - Unique spot reservation for DJX3 and DJX4
@@ -16,7 +16,10 @@ Mobile-first Google Apps Script web app for daily van closing inspections.
 - Inspection history and audit log
 - Daily rescues saved in one batch
 - Daily closing data with automatic van-status counts
-- Closing notes unlocked after every checklist item is ready
+- Closing notes can be sent with available data after confirming a pending-items warning
+- Persistent local-first outbox with automatic retries, idempotency, and foreground/connectivity sync
+- Controlled Edit module for completed Inspections, Closing, and Rescue records
+- Conflict detection and audit details for concurrent edits
 - HTML Closing Notes email with table formatting and up to six photo attachments
 - Closing Notes fleet sections listing Operational vans, Downed/Grounded vans with their status notes, and station-owned vans currently at SHOP
 - Late RTS driver lists grouped with the current station first, followed by the other station
@@ -31,7 +34,7 @@ Mobile-first Google Apps Script web app for daily van closing inspections.
 
 ## Google Sheet
 
-The app expects these tabs: CONFIG, USERS, VANS, SPOTS, INSPECTIONS, PHOTOS, DAMAGES, AUDIT_LOG, LISTS, RESCUE_DRIVERS, RESCUES, DAILY_RESCUE_DRIVERS, RESCUES DJX3, RESCUES DJX4, DAILY_CLOSING, CLOSING_NOTES, and INSPECTION_SKIP_REQUESTS. `USER_INVITATIONS` and `PASSWORD_RESET_REQUESTS` are created automatically for account administration.
+The app expects these tabs: CONFIG, USERS, VANS, SPOTS, INSPECTIONS, PHOTOS, DAMAGES, AUDIT_LOG, LISTS, RESCUE_DRIVERS, RESCUES, DAILY_RESCUE_DRIVERS, RESCUES DJX3, RESCUES DJX4, DAILY_CLOSING, CLOSING_NOTES, and INSPECTION_SKIP_REQUESTS. `USER_INVITATIONS`, `PASSWORD_RESET_REQUESTS`, `SYNC_OPERATIONS`, and `SYNC_METADATA` are created automatically.
 
 Populate VANS and SPOTS before operational use. SHOP must not be added to SPOTS.
 
@@ -50,6 +53,14 @@ Add `CLOSING_EMAIL_RECIPIENTS` to CONFIG to send Closing Notes to management. Pu
 7. Enable GitHub Pages from the main branch.
 
 Do not commit the spreadsheet ID, passwords, session tokens, or deployment secrets to this public repository.
+
+## Local-first behavior
+
+Critical changes are accepted by the interface after they are persisted in IndexedDB. The outbox resumes automatically when connectivity returns, when the app returns to the foreground, and every 30 seconds while it is visible. Google Sheets operations use stable operation IDs; successful operations are recorded in `SYNC_OPERATIONS` so a retry does not duplicate them. Synced photo payloads are removed from the local outbox only after server confirmation.
+
+The web platform cannot continue Apps Script calls after the browser has fully terminated. Pending work survives that closure and resumes the next time the app opens.
+
+Run the local contract tests with `npm test` before deploying.
 
 ## Initial data
 
