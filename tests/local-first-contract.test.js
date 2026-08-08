@@ -41,9 +41,18 @@ test("critical actions use the local outbox instead of direct remote saves", () 
   assert.match(frontend, /visibilitychange/);
 });
 
-test("Edit navigation and pending-note warning are present", () => {
-  assert.match(index, /data-page="edit"/);
+test("inspected vans are searchable while Closing and Rescue edit in place", () => {
+  assert.doesNotMatch(index, /data-page="edit"/);
+  assert.match(index, /data-page="inspected">Inspected Vans/);
+  assert.match(index, /id="inspectedVanSearch"/);
+  assert.match(index, /id="inspectedVanList"/);
   assert.match(index, /id="inspectionEditForm"/);
+  assert.doesNotMatch(index, /editModuleGrid|EDIT CLOSING|EDIT RESCUE/);
+  assert.match(frontend, /function renderInspectedVans\(\)/);
+  assert.match(frontend, /inspection\.VanNumber/);
+  assert.match(frontend, /\.includes\(query\)/);
+  assert.match(frontend, /handleRescueFinalButton/);
+  assert.match(frontend, /renderClosingSaveState/);
   assert.match(frontend, /Send the Closing Notes anyway/);
   assert.doesNotMatch(frontend, /button\.disabled\s*=.*!ready/);
 });
