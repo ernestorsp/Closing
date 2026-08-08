@@ -1,0 +1,1561 @@
+<script>
+  (function () {
+    "use strict";
+
+    const CORE = window.ClosingSyncCore;
+    const DB_NAME = "aaxi_closing_local_first_v1";
+    const DB_VERSION = 1;
+    const STORE = "operations";
+    const FALLBACK_KEY = "aaxi_closing_outbox_v1";
+    const RESCUE_VERSION_PREFIX = "aaxi_closing_rescue_version_v1";
+    const originals = {
+      applyAppData,
+      loadApp,
+      renderAll,
+      renderInspection,
+      renderNotes,
+      renderClosingSaveState,
+      setSyncState,
+      showPage,
+      startInspection,
+      openInspection,
+    };
+    let queueRunning = false;
+    let pullRunning = false;
+    let retryTimer = null;
+    let lastSyncedAt = 0;
+    let editRecord = null;
+
+    function rescueVersionKey(day, station) {
+      return (
+        RESCUE_VERSION_PREFIX +
+        "_" +
+        String(day || DATA.today || "") +
+        "_" +
+        String(station || (DATA.user && DATA.user.station) || "")
+      );
+    }
+
+    function openQueueDb() {
+      return new Promise((resolve, reject) => {
+        if (!window.indexedDB)
+          return reject(new Error("Persistent device storage is unavailable."));
+        const request = indexedDB.open(DB_NAME, DB_VERSION);
+        request.onupgradeneeded = () => {
+          const db = request.result;
+          if (!db.objectStoreNames.contains(STORE))
+            db.createObjectStore(STORE, { keyPath: "id" });
+        };
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () =>
+          reject(
+            request.error || new Error("Could not open persistent storage."),
+          );
+      });
+    }
+
+    async function queueStore(mode, callback) {
+      const db = await openQueueDb();
+      return new Promise((resolve, reject) => {
+        const transaction = db.transaction(STORE, mode);
+        const store = transaction.objectStore(STORE);
+        let result;
+        try {
+          result = callback(store);
+        } catch (error) {
+          db.close();
+          reject(error);
+          return;
+        }
+        transaction.oncomplete = () => {
+          db.close();
+          resolve(result);
+        };
+        transaction.onerror = () => {
+          db.close();
+          reject(transaction.error || new Error("Persistent storage failed."));
+        };
+        transaction.onabort = transaction.onerror;
+      });
+    }
+
+    function fallbackRead() {
+      try {
+        const value = JSON.parse(localStorage.getItem(FALLBACK_KEY) || "[]");
+        return Array.isArray(value) ? value : [];
+      } catch (e) {
+        return [];
+      }
+    }
+
+    function fallbackWrite(rows) {
+      localStorage.setItem(FALLBACK_KEY, JSON.stringify(rows));
+    }
+
+    async function allOperations() {
+      try {
+        const db = await openQueueDb();
+        const stored = await new Promise((resolve, reject) => {
+          const transaction = db.transaction(STORE, "readonly");
+          const request = transaction.objectStore(STORE).getAll();
+          request.onsuccess = () => resolve(request.result || []);
+          request.onerror = () =>
+            reject(request.error || new Error("Could not read the outbox."));
+          transaction.oncomplete = () => db.close();
+        });
+        const merged = new Map(
+          fallbackRead().map((operation) => [operation.id, operation]),
+        );
+        stored.forEach((operation) => merged.set(operation.id, operation));
+        return [...merged.values()];
+      } catch (error) {
+        return fallbackRead();
+      }
+    }
+
+    async function putOperation(operation) {
+      try {
+        await queueStore("readwrite", (store) => store.put(operation));
+        const fallback = fallbackRead().filter(
+          (row) => row.id !== operation.id,
+        );
+        if (fallback.length) fallbackWrite(fallback);
+        else localStorage.removeItem(FALLBACK_KEY);
+      } catch (error) {
+        const rows = fallbackRead().filter((row) => row.id !== operation.id);
+        rows.push(operation);
+        fallbackWrite(rows);
+      }
+      return operation;
+    }
+
+    async function updateOperation(id, changes) {
+      const rows = await allOperations();
+      const current = rows.find((row) => row.id === id);
+      if (!current) return null;
+      return putOperation(
+        Object.assign({}, current, changes, { updatedAt: Date.now() }),
+      );
+    }
+
+    function activeForUser(operation) {
+      const email = String((DATA.user && DATA.user.email) || "").toLowerCase();
+      return (
+        !operation.userEmail ||
+        String(operation.userEmail).toLowerCase() === email
+      );
+    }
+
+    async function unsyncedOperations() {
+      return (await allOperations())
+        .filter(
+          (operation) =>
+            operation.status !== "synced" && activeForUser(operation),
+        )
+        .sort((a, b) => Number(a.createdAt || 0) - Number(b.createdAt || 0));
+    }
+
+    async function dismissActionOperations(type, entityId) {
+      const rows = await unsyncedOperations();
+      await Promise.all(
+        rows
+          .filter(
+            (row) =>
+              row.requiresAction &&
+              (!type || row.type === type) &&
+              (!entityId || String(row.entityId) === String(entityId)),
+          )
+          .map((row) =>
+            updateOperation(row.id, {
+              status: "synced",
+              requiresAction: false,
+              payload: {},
+              lastError: "Dismissed after reviewing the latest remote version.",
+            }),
+          ),
+      );
+    }
+
+    async function enqueueOperation(type, payload, options) {
+      const config = options || {};
+      if (config.replaceAction)
+        await dismissActionOperations(type, config.entityId);
+      const rows = await unsyncedOperations();
+      const coalesced = config.coalesceKey
+        ? rows.find(
+            (row) =>
+              row.coalesceKey === config.coalesceKey &&
+              !row.requiresAction &&
+              row.status !== "syncing",
+          )
+        : null;
+      if (coalesced) {
+        const preservedExpected = {};
+        ["expectedUpdatedAt", "expectedSavedAt", "expectedVersion"].forEach(
+          (key) => {
+            if (
+              Object.prototype.hasOwnProperty.call(coalesced.payload || {}, key)
+            )
+              preservedExpected[key] = coalesced.payload[key];
+          },
+        );
+        coalesced.payload = Object.assign({}, payload, preservedExpected);
+        coalesced.status = "pending";
+        coalesced.nextAttemptAt = Date.now();
+        coalesced.lastError = "";
+        coalesced.requiresAction = false;
+        await putOperation(coalesced);
+        updateSyncIndicator();
+        processSyncQueue();
+        return coalesced;
+      }
+      const operation = CORE.createOperation(type, payload, {
+        entityId: config.entityId,
+        coalesceKey: config.coalesceKey,
+        userEmail: (DATA.user && DATA.user.email) || "",
+        station: (DATA.user && DATA.user.station) || "",
+        day: DATA.today || "",
+      });
+      await putOperation(operation);
+      updateSyncIndicator();
+      processSyncQueue();
+      return operation;
+    }
+
+    function serverOperation(operation) {
+      return new Promise((resolve, reject) => {
+        let settled = false;
+        const timer = setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          reject(
+            new Error(
+              "Synchronization timed out. It will retry automatically.",
+            ),
+          );
+        }, 30000);
+        google.script.run
+          .withSuccessHandler((result) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            resolve(result);
+          })
+          .withFailureHandler((error) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            reject(error);
+          })
+          .syncApplyOperation(TOKEN, operation);
+      });
+    }
+
+    async function rewriteInspectionId(clientId, serverId) {
+      if (!clientId || !serverId || String(clientId) === String(serverId))
+        return;
+      const rows = await unsyncedOperations();
+      await Promise.all(
+        rows
+          .filter(
+            (row) =>
+              String((row.payload || {}).inspectionId) === String(clientId),
+          )
+          .map((row) => {
+            row.payload.inspectionId = serverId;
+            row.entityId = serverId;
+            return putOperation(row);
+          }),
+      );
+      if (
+        CURRENT &&
+        String(CURRENT.inspection.InspectionID) === String(clientId)
+      ) {
+        CURRENT.inspection.InspectionID = serverId;
+        saveInspectionDraft(CURRENT);
+      }
+    }
+
+    async function laterOperations(operation) {
+      return (await unsyncedOperations()).filter(
+        (row) =>
+          row.id !== operation.id &&
+          row.type === operation.type &&
+          String(row.entityId) === String(operation.entityId) &&
+          Number(row.createdAt || 0) >= Number(operation.createdAt || 0),
+      );
+    }
+
+    async function rewriteLaterExpected(operation, key, value, targetType) {
+      if (value == null || value === "") return;
+      const rows = targetType
+        ? (await unsyncedOperations()).filter(
+            (row) =>
+              row.id !== operation.id &&
+              row.type === targetType &&
+              String(row.entityId) === String(operation.entityId) &&
+              Number(row.createdAt || 0) >= Number(operation.createdAt || 0),
+          )
+        : await laterOperations(operation);
+      await Promise.all(
+        rows.map((row) => {
+          row.payload = Object.assign({}, row.payload || {}, { [key]: value });
+          return putOperation(row);
+        }),
+      );
+    }
+
+    async function applyOperationResult(operation, response) {
+      const result = (response && response.result) || response || {};
+      if (operation.type === "START_INSPECTION" && result.inspection) {
+        await rewriteInspectionId(
+          result.clientInspectionId || operation.payload.inspectionId,
+          result.inspection.InspectionID,
+        );
+      }
+      if (operation.type === "SAVE_CLOSING" && result.record) {
+        await rewriteLaterExpected(
+          operation,
+          "expectedUpdatedAt",
+          result.record.UpdatedAt || result.record.SavedAt,
+        );
+        const currentContext =
+          String(operation.day || "") === String(DATA.today || "") &&
+          String(operation.station || "") ===
+            String((DATA.user && DATA.user.station) || "");
+        if (!(await laterOperations(operation)).length && currentContext) {
+          DATA.closingData = result.record;
+          DATA.vanCounts = result.vanCounts || DATA.vanCounts;
+          CLOSING_DRAFT = closingRecordToDraft(result.record);
+        }
+        if (!(await laterOperations(operation)).length)
+          localStorage.removeItem(
+            "closing_data_" +
+              String(operation.day || "") +
+              "_" +
+              String(operation.station || ""),
+          );
+      }
+      if (operation.type === "SAVE_RESCUES") {
+        await rewriteLaterExpected(
+          operation,
+          "expectedVersion",
+          Number(result.version || 0),
+        );
+        localStorage.setItem(
+          rescueVersionKey(operation.day, operation.station),
+          String(result.version || 0),
+        );
+        const currentContext =
+          String(operation.day || "") === String(DATA.today || "") &&
+          String(operation.station || "") ===
+            String((DATA.user && DATA.user.station) || "");
+        if (currentContext) DATA.rescueVersion = Number(result.version || 0);
+        if (!(await laterOperations(operation)).length)
+          localStorage.removeItem(
+            "closing_rescues_" +
+              String(operation.day || "") +
+              "_" +
+              String(operation.station || ""),
+          );
+      }
+      if (
+        operation.type === "FINISH_INSPECTION" ||
+        operation.type === "EDIT_INSPECTION"
+      ) {
+        if (operation.type === "FINISH_INSPECTION" && result.inspection)
+          await rewriteLaterExpected(
+            operation,
+            "expectedUpdatedAt",
+            result.inspection.UpdatedAt || result.inspection.CompletedAt,
+            "EDIT_INSPECTION",
+          );
+        if (operation.type === "EDIT_INSPECTION" && result.inspection)
+          await rewriteLaterExpected(
+            operation,
+            "expectedUpdatedAt",
+            result.inspection.UpdatedAt ||
+              result.inspection.EditedAt ||
+              result.inspection.CompletedAt,
+          );
+        if (result.inspection) {
+          DATA.completedToday = [
+            result.inspection,
+            ...(DATA.completedToday || []).filter(
+              (row) =>
+                String(row.InspectionID) !==
+                String(result.inspection.InspectionID),
+            ),
+          ];
+        }
+        if (result.van)
+          DATA.vans = (DATA.vans || []).map((van) =>
+            String(van.VanID) === String(result.van.VanID) ? result.van : van,
+          );
+      }
+      if (
+        ["SAVE_INSPECTION_PHOTO", "SAVE_DAMAGE"].includes(operation.type) &&
+        result.inspection &&
+        Array.isArray(result.photos) &&
+        CURRENT &&
+        String(CURRENT.inspection.InspectionID) ===
+          String(result.inspection.InspectionID)
+      )
+        originals.renderInspection(result);
+      if (operation.type === "SEND_NOTES" && result.record) {
+        const currentContext =
+          String(operation.day || "") === String(DATA.today || "") &&
+          String(operation.station || "") ===
+            String((DATA.user && DATA.user.station) || "");
+        if (currentContext) {
+          NOTES_SENDING = false;
+          NOTE_PHOTOS = [];
+          DATA.closingNote = result.record;
+          if (DATA.checklist) DATA.checklist.notesSent = true;
+        }
+        localStorage.removeItem(
+          "closing_notes_" +
+            String(operation.day || "") +
+            "_" +
+            String(operation.station || ""),
+        );
+      }
+      saveAppCache(DATA);
+      renderAll();
+    }
+
+    async function nextOperation() {
+      const rows = await unsyncedOperations();
+      const now = Date.now();
+      rows.forEach((row) => {
+        if (
+          row.status === "syncing" &&
+          now - Number(row.updatedAt || 0) > 120000
+        ) {
+          row.status = "retry";
+          row.nextAttemptAt = now;
+          putOperation(row);
+        }
+      });
+      return rows.find((row, index) => {
+        if (row.requiresAction || Number(row.nextAttemptAt || 0) > now)
+          return false;
+        return !rows
+          .slice(0, index)
+          .some(
+            (earlier) =>
+              earlier.requiresAction &&
+              earlier.entityId &&
+              String(earlier.entityId) === String(row.entityId),
+          );
+      });
+    }
+
+    async function processSyncQueue(manual) {
+      if (queueRunning || !TOKEN || !navigator.onLine) {
+        updateSyncIndicator();
+        return;
+      }
+      queueRunning = true;
+      updateSyncIndicator();
+      try {
+        let operation = await nextOperation();
+        while (operation && navigator.onLine && TOKEN) {
+          operation.status = "syncing";
+          operation.updatedAt = Date.now();
+          await putOperation(operation);
+          updateSyncIndicator();
+          try {
+            const response = await serverOperation(operation);
+            await applyOperationResult(operation, response);
+            operation.status = "synced";
+            operation.payload = {};
+            operation.lastError = "";
+            operation.requiresAction = false;
+            operation.syncedAt = Date.now();
+            await putOperation(operation);
+            lastSyncedAt = Date.now();
+          } catch (error) {
+            const info = CORE.errorInfo(error);
+            operation.attempts = Number(operation.attempts || 0) + 1;
+            operation.status = "retry";
+            operation.lastError = info.message;
+            operation.requiresAction = info.requiresAction;
+            operation.nextAttemptAt = info.requiresAction
+              ? Number.MAX_SAFE_INTEGER
+              : Date.now() + CORE.retryDelay(operation.attempts);
+            await putOperation(operation);
+            if (info.requiresAction)
+              toast(
+                info.conflict
+                  ? "Another user saved a newer version. Review it in Edit before trying again."
+                  : info.message,
+                true,
+              );
+            if (/AUTH_REQUIRED/.test(info.message)) {
+              authFail(error);
+              break;
+            }
+          }
+          operation = await nextOperation();
+        }
+      } finally {
+        queueRunning = false;
+        updateSyncIndicator();
+        const rows = await unsyncedOperations();
+        const retryAt = rows
+          .filter((row) => !row.requiresAction)
+          .map((row) => Number(row.nextAttemptAt || 0))
+          .filter((value) => value > Date.now())
+          .sort((a, b) => a - b)[0];
+        clearTimeout(retryTimer);
+        if (retryAt)
+          retryTimer = setTimeout(
+            processSyncQueue,
+            Math.min(60000, Math.max(500, retryAt - Date.now())),
+          );
+        if (
+          !rows.length &&
+          navigator.onLine &&
+          document.visibilityState === "visible"
+        ) {
+          setTimeout(() => syncAppData(!!manual, false, true), 250);
+        } else if (manual && rows.some((row) => row.requiresAction)) {
+          toast(
+            "Some changes need review before they can be synchronized.",
+            true,
+          );
+        }
+      }
+    }
+
+    async function updateSyncIndicator() {
+      const status = document.getElementById("syncStatus");
+      if (!status) return;
+      const rows = await unsyncedOperations();
+      const action = rows.filter((row) => row.requiresAction).length;
+      status.classList.toggle("hasPending", rows.length > 0);
+      status.classList.toggle("needsAction", action > 0);
+      if (action) status.textContent = action + " needs review";
+      else if (queueRunning || pullRunning) status.textContent = "Syncing…";
+      else if (rows.length) status.textContent = rows.length + " pending";
+      else
+        status.textContent = lastSyncedAt
+          ? "Synced"
+          : navigator.onLine
+            ? "Ready"
+            : "Offline";
+    }
+
+    function serverGetAppData(force) {
+      return new Promise((resolve, reject) => {
+        let settled = false;
+        const timer = setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          reject(new Error("Synchronization timed out."));
+        }, 30000);
+        google.script.run
+          .withSuccessHandler((data) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            resolve(data);
+          })
+          .withFailureHandler((error) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            reject(error);
+          })
+          .getAppData(TOKEN, !!force);
+      });
+    }
+
+    function mergePendingSnapshot(remote, operations) {
+      const data = remote || {};
+      const current = DATA || {};
+      const relevant = (type) =>
+        operations.some(
+          (operation) =>
+            operation.type === type &&
+            String(operation.day || "") === String(data.today || "") &&
+            String(operation.station || "") ===
+              String((data.user && data.user.station) || ""),
+        );
+      if (relevant("SAVE_CLOSING") && current.closingData) {
+        data.closingData = current.closingData;
+        if (data.checklist && current.checklist) {
+          data.checklist.pickupReady = current.checklist.pickupReady;
+          data.checklist.returnedPackagesReady =
+            current.checklist.returnedPackagesReady;
+          data.checklist.routesTomorrowReady =
+            current.checklist.routesTomorrowReady;
+        }
+      }
+      if (relevant("SAVE_RESCUES")) {
+        data.dailyRescueDrivers =
+          current.dailyRescueDrivers || data.dailyRescueDrivers;
+        data.rescues = current.rescues || data.rescues;
+        data.rescueFinalized = current.rescueFinalized;
+        if (data.checklist && current.checklist)
+          data.checklist.rescuesReady = current.checklist.rescuesReady;
+      }
+      if (
+        ["START_INSPECTION", "FINISH_INSPECTION", "EDIT_INSPECTION"].some(
+          (type) => relevant(type),
+        )
+      ) {
+        data.completedToday = current.completedToday || data.completedToday;
+        data.completedVanIds = current.completedVanIds || data.completedVanIds;
+        data.inProgress = current.inProgress || data.inProgress;
+        data.stats = Object.assign({}, data.stats || {}, current.stats || {});
+        if (data.checklist && current.checklist) {
+          data.checklist.inspectionsCompleted =
+            current.checklist.inspectionsCompleted;
+          data.checklist.inspectionsReady = current.checklist.inspectionsReady;
+        }
+      }
+      if (relevant("SEND_NOTES") && current.closingNote) {
+        data.closingNote = current.closingNote;
+        if (data.checklist && current.checklist)
+          data.checklist.notesSent = current.checklist.notesSent;
+      }
+      if (data.checklist)
+        data.checklist.allReady =
+          !!data.checklist.inspectionsReady &&
+          !!data.checklist.rescuesReady &&
+          !!data.checklist.pickupReady &&
+          !!data.checklist.returnedPackagesReady &&
+          !!data.checklist.routesTomorrowReady;
+      return data;
+    }
+
+    syncAppData = async function (manual, blocking, force) {
+      if (pullRunning || !TOKEN || !navigator.onLine) {
+        if (manual && !navigator.onLine)
+          toast("You are offline. Changes remain pending on this device.");
+        updateSyncIndicator();
+        return;
+      }
+      let pending = await unsyncedOperations();
+      if (pending.some((row) => !row.requiresAction)) {
+        if (queueRunning) return;
+        await processSyncQueue(manual);
+        pending = await unsyncedOperations();
+      }
+      pullRunning = true;
+      setSyncState(true);
+      try {
+        const data = mergePendingSnapshot(
+          await serverGetAppData(!!manual || !!force),
+          pending,
+        );
+        saveAppCache(data);
+        applyAppData(data);
+        lastSyncedAt = Date.now();
+        if (manual) toast("Everything is synchronized.");
+      } catch (error) {
+        showSessionLoading(false);
+        const message = String((error && error.message) || error);
+        if (message.includes("AUTH_REQUIRED")) authFail(error);
+        else if (manual)
+          toast(
+            readAppCache()
+              ? "Could not synchronize now. Saved data is still available."
+              : message,
+            true,
+          );
+      } finally {
+        pullRunning = false;
+        setSyncState(false);
+        updateSyncIndicator();
+      }
+    };
+
+    setSyncState = function (syncing) {
+      SYNCING = syncing;
+      const button = document.getElementById("syncButton");
+      if (button) {
+        button.disabled = !!syncing;
+        button.classList.toggle("syncing", !!syncing);
+        const label = button.querySelector(".syncLabel");
+        if (label) label.textContent = syncing ? "Syncing…" : "Sync now";
+      }
+      updateSyncIndicator();
+    };
+
+    manualSync = function () {
+      processSyncQueue(true);
+      syncAppData(true, false, true);
+    };
+
+    loadApp = function () {
+      const cached = readAppCache();
+      if (cached) applyAppData(cached);
+      else showSessionLoading(true);
+      processSyncQueue().finally(() => syncAppData(false, !cached, true));
+    };
+
+    function fetchMetadata() {
+      if (!TOKEN || !navigator.onLine) return;
+      google.script.run
+        .withSuccessHandler((metadata) => {
+          const version = Number((metadata && metadata.rescueVersion) || 0);
+          DATA.rescueVersion = version;
+          localStorage.setItem(rescueVersionKey(), String(version));
+        })
+        .withFailureHandler(() => {})
+        .getLocalFirstMetadata(TOKEN);
+    }
+
+    applyAppData = function (data) {
+      originals.applyAppData(data);
+      DATA.rescueVersion = Number(
+        DATA.rescueVersion || localStorage.getItem(rescueVersionKey()) || 0,
+      );
+      renderEditModule();
+      updateSyncIndicator();
+      unsyncedOperations().then((operations) => {
+        NOTES_SENDING = operations.some(
+          (operation) =>
+            operation.type === "SEND_NOTES" &&
+            String(operation.day || "") === String(DATA.today || "") &&
+            String(operation.station || "") ===
+              String((DATA.user && DATA.user.station) || ""),
+        );
+        renderNotes();
+      });
+      fetchMetadata();
+    };
+
+    renderAll = function () {
+      originals.renderAll();
+      renderEditModule();
+      updateSyncIndicator();
+    };
+
+    showPage = function (id) {
+      originals.showPage(id);
+      if (id === "edit") renderEditModule();
+    };
+
+    function inspectionDraftKey(id) {
+      return "inspection_draft_v1_" + String(id || "");
+    }
+
+    function saveInspectionDraft(data) {
+      if (!data || !data.inspection || !data.inspection.InspectionID) return;
+      try {
+        data.localDamageAnswer = DAMAGE_ANSWER;
+        localStorage.setItem(
+          inspectionDraftKey(data.inspection.InspectionID),
+          JSON.stringify({ savedAt: Date.now(), data }),
+        );
+      } catch (e) {}
+    }
+
+    function readInspectionDraft(id) {
+      try {
+        const saved = JSON.parse(
+          localStorage.getItem(inspectionDraftKey(id)) || "null",
+        );
+        return saved && saved.data;
+      } catch (e) {
+        return null;
+      }
+    }
+
+    renderInspection = function (data) {
+      originals.renderInspection(data);
+      saveInspectionDraft(CURRENT);
+    };
+
+    startInspection = function (vanId, button) {
+      if (button)
+        return quickActionDelay(button, () => startInspection(vanId), "");
+      originals.startInspection(vanId);
+      if (!CURRENT) return;
+      const inspectionId =
+        CURRENT.inspection.InspectionID || localId("inspection");
+      CURRENT.inspection.InspectionID = inspectionId;
+      CURRENT.inspection.StartedAt =
+        CURRENT.inspection.StartedAt || new Date().toISOString();
+      CURRENT.inspection.UpdatedAt = CURRENT.inspection.StartedAt;
+      CURRENT.localPreview = false;
+      DATA.inProgress = [
+        CURRENT.inspection,
+        ...(DATA.inProgress || []).filter(
+          (row) => String(row.VanID) !== String(vanId),
+        ),
+      ];
+      saveInspectionDraft(CURRENT);
+      saveAppCache(DATA);
+      originals.renderInspection(CURRENT);
+      enqueueOperation(
+        "START_INSPECTION",
+        { vanId, inspectionId, station: DATA.user.station },
+        { entityId: inspectionId },
+      ).catch((error) =>
+        toast(
+          "The inspection could not be stored on this device. " + error.message,
+          true,
+        ),
+      );
+    };
+
+    openInspection = function (id, button) {
+      if (button) return quickActionDelay(button, () => openInspection(id), "");
+      const draft = readInspectionDraft(id);
+      if (draft) {
+        DAMAGE_ANSWER = draft.localDamageAnswer || "";
+        renderInspection(draft);
+        showPage("inspection");
+        return;
+      }
+      originals.openInspection(id);
+    };
+
+    expireLocalInspections = function () {
+      if (CURRENT) saveInspectionDraft(CURRENT);
+    };
+
+    capturePhoto = function (part, input, replace) {
+      const file = input.files[0];
+      if (!file || !CURRENT || PHOTO_UPLOADS.has(part)) return;
+      PHOTO_UPLOADS.add(part);
+      renderInspection(CURRENT);
+      resizeImage(file, 1280, 0.78, (image) => {
+        if (!CURRENT) return PHOTO_UPLOADS.delete(part);
+        const inspectionId = CURRENT.inspection.InspectionID;
+        const placeholder = {
+          PhotoID: localId("photo"),
+          InspectionID: inspectionId,
+          Part: part,
+          CapturedAt: new Date().toISOString(),
+          pending: true,
+        };
+        CURRENT.photos = [
+          placeholder,
+          ...(CURRENT.photos || []).filter((row) => row.Part !== part),
+        ];
+        enqueueOperation(
+          "SAVE_INSPECTION_PHOTO",
+          { inspectionId, part, image, replace: !!replace },
+          { entityId: inspectionId },
+        )
+          .then(() => {
+            PHOTO_UPLOADS.delete(part);
+            saveInspectionDraft(CURRENT);
+            renderInspection(CURRENT);
+            input.value = "";
+          })
+          .catch((error) => {
+            PHOTO_UPLOADS.delete(part);
+            renderInspection(CURRENT);
+            toast(
+              "The photo could not be stored on this device. " + error.message,
+              true,
+            );
+          });
+      });
+    };
+
+    captureDamage = function () {
+      const input = document.getElementById("damagePhoto");
+      const file = input.files[0];
+      if (!file || !CURRENT) return;
+      const part = document.getElementById("damagePart").value;
+      const severity = document.getElementById("damageSeverity").value;
+      damagePhotoFeedback(input);
+      DAMAGE_UPLOAD = {
+        vanId: String(CURRENT.inspection.VanID),
+        inspectionId: String(CURRENT.inspection.InspectionID),
+        status: "preparing",
+      };
+      updateFinishState();
+      resizeImage(file, 1280, 0.8, (image) => {
+        if (!CURRENT) return;
+        const inspectionId = CURRENT.inspection.InspectionID;
+        enqueueOperation(
+          "SAVE_DAMAGE",
+          { inspectionId, part, severity, image },
+          { entityId: inspectionId },
+        )
+          .then(() => {
+            CURRENT.damages = [
+              ...(CURRENT.damages || []),
+              {
+                DamageID: localId("damage"),
+                InspectionID: inspectionId,
+                Part: part,
+                Severity: severity,
+                Assessment: "New Damage",
+                ReportedAt: new Date().toISOString(),
+                pending: true,
+              },
+            ];
+            DAMAGE_UPLOAD = null;
+            input.value = "";
+            saveInspectionDraft(CURRENT);
+            renderInspection(CURRENT);
+          })
+          .catch((error) => {
+            DAMAGE_UPLOAD = null;
+            updateFinishState();
+            toast(
+              "The damage photo could not be stored on this device. " +
+                error.message,
+              true,
+            );
+          });
+      });
+    };
+
+    finishInspection = function () {
+      if (FINISHING || !CURRENT) return;
+      const button = document.getElementById("finishBtn");
+      const draft = CURRENT.locationDraft || {};
+      const snapshot = CURRENT;
+      const inspectionId = snapshot.inspection.InspectionID;
+      const payload = {
+        inspectionId,
+        status: document.getElementById("vanStatus").value,
+        notes: document.getElementById("inspectionNotes").value,
+        newDamageFound: DAMAGE_ANSWER,
+        station: String(
+          draft.station || document.getElementById("vanLocation").value,
+        ),
+        spotId: String(
+          document.getElementById("spot").value || draft.spotId || "",
+        ),
+      };
+      FINISHING = true;
+      button.disabled = true;
+      button.innerHTML =
+        '<span class="spinner small buttonSpinner"></span> Finishing…';
+      const vanId = String(snapshot.inspection.VanID);
+      const placeholder = Object.assign({}, snapshot.inspection, {
+        Station: payload.station,
+        Spot: draft.spot || (payload.station === "SHOP" ? "SHOP" : ""),
+        Status: payload.station === "SHOP" ? "Grounded" : payload.status,
+        Notes: payload.notes,
+        InspectionState: "Completed",
+        CompletedAt: new Date().toISOString(),
+        UpdatedAt: new Date().toISOString(),
+        pending: true,
+      });
+      DATA.completedVanIds = [
+        ...new Set([...(DATA.completedVanIds || []).map(String), vanId]),
+      ];
+      DATA.completedToday = [
+        placeholder,
+        ...(DATA.completedToday || []).filter(
+          (row) => String(row.VanID) !== vanId,
+        ),
+      ];
+      DATA.inProgress = (DATA.inProgress || []).filter(
+        (row) => String(row.VanID) !== vanId,
+      );
+      if (DATA.checklist) {
+        DATA.checklist.inspectionsCompleted = Math.min(
+          Number(DATA.checklist.inspectionsTotal || 0),
+          Number(DATA.checklist.inspectionsCompleted || 0) + 1,
+        );
+        DATA.checklist.inspectionsReady =
+          DATA.checklist.inspectionsCompleted >=
+          Number(DATA.checklist.inspectionsTotal || 0);
+        DATA.checklist.allReady =
+          !!DATA.checklist.inspectionsReady &&
+          !!DATA.checklist.rescuesReady &&
+          !!DATA.checklist.pickupReady &&
+          !!DATA.checklist.returnedPackagesReady &&
+          !!DATA.checklist.routesTomorrowReady;
+      }
+      if (DATA.stats) {
+        DATA.stats.completed = Number(DATA.stats.completed || 0) + 1;
+        DATA.stats.pending = Math.max(0, Number(DATA.stats.pending || 0) - 1);
+      }
+      snapshot.finishedPending = true;
+      saveInspectionDraft(snapshot);
+      saveAppCache(DATA);
+      renderAll();
+      enqueueOperation("FINISH_INSPECTION", payload, { entityId: inspectionId })
+        .then(() => {
+          setTimeout(() => {
+            FINISHING = false;
+            CURRENT = null;
+            DAMAGE_ANSWER = "";
+            PHOTO_UPLOADS.clear();
+            renderAll();
+            showPage("pending");
+            toast(
+              "Inspection saved on this device. Synchronization continues in the background.",
+            );
+          }, 500);
+        })
+        .catch((error) => {
+          FINISHING = false;
+          setFinishBusy(false);
+          toast(
+            "The inspection could not be stored on this device. " +
+              error.message,
+            true,
+          );
+        });
+    };
+
+    renderClosingSaveState = function () {
+      originals.renderClosingSaveState();
+      const meta = document.getElementById("closingSaveMeta");
+      if (meta && DATA.closingData && DATA.closingData.pending)
+        meta.textContent =
+          "Saved on this device · Remote synchronization is pending.";
+    };
+
+    saveClosingData = function (event) {
+      event.preventDefault();
+      if (CLOSING_SAVING) return;
+      closingFieldChanged();
+      const payload = closingPayload();
+      const error = validateClosingPayload(payload);
+      if (error) return toast(error, true);
+      const button =
+        event.submitter || document.getElementById("closingSaveBtn");
+      const previous = DATA.closingData;
+      payload.expectedUpdatedAt =
+        previous &&
+        (previous._remoteUpdatedAt || previous.UpdatedAt || previous.SavedAt);
+      CLOSING_SAVING = true;
+      const now = new Date().toISOString();
+      DATA.closingData = Object.assign({}, previous || {}, {
+        RecordKey: payload.date + "_" + DATA.user.station,
+        RecordDate: payload.date,
+        Station: DATA.user.station,
+        RoutesTomorrow: payload.routesTomorrow,
+        PickupAll: payload.pickupAll,
+        PickupComment: payload.pickupComment,
+        Phones: payload.phones,
+        BatteryPacks: payload.batteryPacks,
+        DriversWithReceipts: payload.driversWithReceipts,
+        ReturnedPackages: payload.returnedPackages,
+        LateRTSDriverIDs: (payload.lateDriverIds || []).join(" | "),
+        DVICDriverIDs: (payload.dvicDriverIds || []).join(" | "),
+        SavedAt: now,
+        UpdatedAt: now,
+        _remoteUpdatedAt: payload.expectedUpdatedAt || "",
+        pending: true,
+      });
+      if (String(payload.date) === String(DATA.today) && DATA.checklist) {
+        DATA.checklist.pickupReady = true;
+        DATA.checklist.returnedPackagesReady = true;
+        DATA.checklist.routesTomorrowReady = true;
+        DATA.checklist.allReady =
+          !!DATA.checklist.inspectionsReady && !!DATA.checklist.rescuesReady;
+      }
+      saveAppCache(DATA);
+      renderChecklist();
+      renderNotes();
+      renderClosingSaveState();
+      button.disabled = true;
+      button.innerHTML =
+        '<span class="spinner small buttonSpinner"></span> Saving…';
+      enqueueOperation("SAVE_CLOSING", payload, {
+        entityId: payload.date + "_" + DATA.user.station,
+        coalesceKey: "closing_" + payload.date + "_" + DATA.user.station,
+        replaceAction: true,
+      })
+        .then(() => {
+          setTimeout(() => {
+            CLOSING_SAVING = false;
+            renderClosingData();
+            renderClosingSaveState();
+            toast(
+              "Closing saved on this device. Synchronization continues in the background.",
+            );
+          }, 500);
+        })
+        .catch((storageError) => {
+          CLOSING_SAVING = false;
+          renderClosingSaveState();
+          toast(
+            "Closing could not be stored on this device. " +
+              storageError.message,
+            true,
+          );
+        });
+    };
+
+    handleRescueFinalButton = function (button) {
+      if (!DATA.rescueFinalized) return finalizeRescues(button);
+      DATA.rescueFinalized = false;
+      if (DATA.checklist) {
+        DATA.checklist.rescuesReady = false;
+        DATA.checklist.allReady = false;
+      }
+      (DATA.rescues || []).forEach((row) => (row.Status = "Draft"));
+      persistRescueDraft();
+      renderRescues();
+      renderChecklist();
+      renderNotes();
+    };
+
+    finalizeRescues = function (button) {
+      if (RESCUE_SAVING) return;
+      const payload = rescueBatchPayload();
+      const error = validateRescueBatch(payload);
+      if (error) return toast(error, true);
+      payload.expectedVersion = Number(
+        DATA.rescueVersion || localStorage.getItem(rescueVersionKey()) || 0,
+      );
+      RESCUE_SAVING = true;
+      DATA.rescueFinalized = true;
+      (DATA.rescues || []).forEach((row) => (row.Status = "Saved"));
+      if (DATA.checklist) {
+        DATA.checklist.rescuesReady = true;
+        DATA.checklist.allReady =
+          !!DATA.checklist.inspectionsReady &&
+          !!DATA.checklist.pickupReady &&
+          !!DATA.checklist.returnedPackagesReady &&
+          !!DATA.checklist.routesTomorrowReady;
+      }
+      saveAppCache(DATA);
+      button.disabled = true;
+      button.innerHTML =
+        '<span class="spinner small buttonSpinner"></span> Saving…';
+      renderChecklist();
+      renderNotes();
+      enqueueOperation("SAVE_RESCUES", payload, {
+        entityId: DATA.today + "_" + DATA.user.station,
+        coalesceKey: "rescues_" + DATA.today + "_" + DATA.user.station,
+        replaceAction: true,
+      })
+        .then(() => {
+          setTimeout(() => {
+            RESCUE_SAVING = false;
+            renderRescues();
+            toast(
+              "Rescues saved on this device. Synchronization continues in the background.",
+            );
+          }, 500);
+        })
+        .catch((storageError) => {
+          RESCUE_SAVING = false;
+          renderRescues();
+          toast(
+            "Rescues could not be stored on this device. " +
+              storageError.message,
+            true,
+          );
+        });
+    };
+
+    renderNotes = function () {
+      const text = document.getElementById("closingNotesText");
+      const button = document.getElementById("sendClosingNotesBtn");
+      const meta = document.getElementById("notesReadyMeta");
+      if (!text || !button || !meta) return;
+      const sent = !!(DATA.closingNote && !DATA.closingNote.optimistic);
+      if (sent) {
+        text.value = DATA.closingNote.Notes || "";
+        localStorage.removeItem(notesDraftKey());
+      } else if (!text.value)
+        text.value = localStorage.getItem(notesDraftKey()) || "";
+      const pending = CORE.pendingChecklist(DATA.checklist, NOTE_PHOTO_LOADING);
+      text.disabled = sent || NOTES_SENDING;
+      button.disabled = sent || NOTES_SENDING;
+      button.textContent = NOTES_SENDING
+        ? "Saved · Sending in background…"
+        : "SEND CLOSING NOTES";
+      meta.textContent = sent
+        ? "Ready · Closing notes and email were sent for today."
+        : NOTES_SENDING
+          ? "Saved on this device. Email delivery is pending."
+          : pending.length
+            ? "You can send now; a warning will list " +
+              pending.length +
+              " pending item" +
+              (pending.length === 1 ? "" : "s") +
+              "."
+            : "All checklist items are Ready. Notes can be emailed.";
+      renderNotePhotos();
+    };
+
+    sendClosingNotesNow = async function (button) {
+      if (NOTES_SENDING || (DATA.closingNote && !DATA.closingNote.optimistic))
+        return;
+      const notes = document.getElementById("closingNotesText").value.trim();
+      if (!notes) return toast("Write the closing notes before sending.", true);
+      const pending = CORE.pendingChecklist(DATA.checklist, NOTE_PHOTO_LOADING);
+      const queued = await unsyncedOperations();
+      const queuedUploads = queued.filter((operation) =>
+        ["SAVE_INSPECTION_PHOTO", "SAVE_DAMAGE"].includes(operation.type),
+      ).length;
+      if (queuedUploads) pending.push("inspection photos still pending upload");
+      if (queued.some((operation) => operation.type === "SAVE_CLOSING"))
+        pending.push("Closing changes pending synchronization");
+      if (queued.some((operation) => operation.type === "SAVE_RESCUES"))
+        pending.push("Rescue changes pending synchronization");
+      if (
+        queued.some((operation) =>
+          ["START_INSPECTION", "FINISH_INSPECTION", "EDIT_INSPECTION"].includes(
+            operation.type,
+          ),
+        )
+      )
+        pending.push("inspection changes pending synchronization");
+      if (queued.some((operation) => operation.requiresAction))
+        pending.push("changes that require review");
+      if (
+        pending.length &&
+        !confirm(
+          "Some information is still pending:\n\n• " +
+            pending.join("\n• ") +
+            "\n\nSend the Closing Notes anyway using the information currently available?",
+        )
+      )
+        return;
+      const payload = {
+        notes,
+        force: pending.length > 0,
+        photos: NOTE_PHOTOS.map((photo) => ({
+          name: photo.name,
+          data: photo.data,
+        })),
+      };
+      NOTES_SENDING = true;
+      DATA.closingNote = { Notes: notes, optimistic: true, pending: true };
+      if (DATA.checklist) DATA.checklist.notesSent = true;
+      notesChanged();
+      saveAppCache(DATA);
+      button.disabled = true;
+      button.innerHTML =
+        '<span class="spinner small buttonSpinner"></span> Saving…';
+      renderChecklist();
+      enqueueOperation("SEND_NOTES", payload, {
+        entityId: DATA.today + "_" + DATA.user.station,
+        coalesceKey: "notes_" + DATA.today + "_" + DATA.user.station,
+      })
+        .then(() => {
+          setTimeout(() => {
+            renderNotes();
+            toast(
+              "Closing Notes saved. Email delivery continues in the background.",
+            );
+          }, 500);
+        })
+        .catch((storageError) => {
+          NOTES_SENDING = false;
+          DATA.closingNote = null;
+          if (DATA.checklist) DATA.checklist.notesSent = false;
+          renderNotes();
+          toast(
+            "Closing Notes could not be stored on this device. " +
+              storageError.message,
+            true,
+          );
+        });
+    };
+
+    function availableEditSpots(inspection, station) {
+      return (DATA.spots || []).filter(
+        (spot) =>
+          String(spot.Station) === String(station) &&
+          (!spot.OccupiedByVanID ||
+            String(spot.OccupiedByVanID) === String(inspection.VanID)),
+      );
+    }
+
+    function renderInspectionEditor(record) {
+      editRecord = record;
+      const inspection = record.inspection;
+      const form = document.getElementById("inspectionEditForm");
+      const list = document.getElementById("editInspectionList");
+      if (!form || !list) return;
+      list.hidden = true;
+      form.hidden = false;
+      form.dataset.dirty = "0";
+      form.dataset.inspectionId = inspection.InspectionID;
+      form.dataset.expectedUpdatedAt =
+        inspection._remoteUpdatedAt ||
+        inspection.UpdatedAt ||
+        inspection.EditedAt ||
+        inspection.CompletedAt ||
+        "";
+      form.querySelector("[data-edit-title]").textContent =
+        "Edit " + inspection.VanNumber;
+      form.elements.status.value = inspection.Status || "Operational";
+      form.elements.notes.value = inspection.Notes || "";
+      form.elements.station.value = inspection.Station || DATA.user.station;
+      renderInspectionEditSpots(inspection.Spot || "");
+      const audit = form.querySelector("[data-edit-audit]");
+      audit.textContent = (record.audit || []).length
+        ? "Recent edits: " +
+          record.audit
+            .slice(0, 3)
+            .map(
+              (event) =>
+                fmt(event.Timestamp) + " by " + (event.UserEmail || "Unknown"),
+            )
+            .join(" · ")
+        : "No previous edits recorded.";
+    }
+
+    window.renderInspectionEditSpots = function (selected) {
+      if (!editRecord) return;
+      const form = document.getElementById("inspectionEditForm");
+      const station = form.elements.station.value;
+      const spotWrap = form.querySelector("[data-edit-spot-wrap]");
+      const spot = form.elements.spotId;
+      spotWrap.hidden = station === "SHOP";
+      if (station === "SHOP") {
+        spot.innerHTML = '<option value="">SHOP</option>';
+        return;
+      }
+      const options = availableEditSpots(editRecord.inspection, station);
+      spot.innerHTML =
+        '<option value="">Select available spot</option>' +
+        options
+          .map(
+            (row) =>
+              '<option value="' +
+              esc(row.SpotID) +
+              '" ' +
+              (String(row.Spot) ===
+              String(selected || editRecord.inspection.Spot)
+                ? "selected"
+                : "") +
+              ">" +
+              esc(row.Spot) +
+              "</option>",
+          )
+          .join("");
+    };
+
+    window.openInspectionEditor = function (inspectionId) {
+      const inspection = (DATA.completedToday || []).find(
+        (row) => String(row.InspectionID) === String(inspectionId),
+      );
+      if (!inspection)
+        return toast("Inspection not found in the saved device data.", true);
+      renderInspectionEditor({ inspection, audit: [] });
+      if (!navigator.onLine) return;
+      google.script.run
+        .withSuccessHandler((record) => {
+          if (
+            document.getElementById("inspectionEditForm").dataset.dirty === "1"
+          )
+            return;
+          if (record && Array.isArray(record.spots)) DATA.spots = record.spots;
+          renderInspectionEditor(record);
+        })
+        .withFailureHandler(() => {})
+        .getEditableInspection(TOKEN, inspectionId);
+    };
+
+    window.closeInspectionEditor = function () {
+      editRecord = null;
+      document.getElementById("inspectionEditForm").hidden = true;
+      document.getElementById("editInspectionList").hidden = false;
+      renderEditModule();
+    };
+
+    window.saveInspectionEdit = function (event) {
+      event.preventDefault();
+      if (!editRecord) return;
+      const form = event.currentTarget;
+      const inspection = editRecord.inspection;
+      const station = form.elements.station.value;
+      const payload = {
+        inspectionId: inspection.InspectionID,
+        expectedUpdatedAt: form.dataset.expectedUpdatedAt,
+        status: form.elements.status.value,
+        notes: form.elements.notes.value,
+        station,
+        spotId: station === "SHOP" ? "" : form.elements.spotId.value,
+      };
+      if (station !== "SHOP" && !payload.spotId)
+        return toast("Select an available spot.", true);
+      const spot = (DATA.spots || []).find(
+        (row) => String(row.SpotID) === String(payload.spotId),
+      );
+      const now = new Date().toISOString();
+      const updated = Object.assign({}, inspection, {
+        Status: station === "SHOP" ? "Grounded" : payload.status,
+        Notes: payload.notes,
+        Station: station,
+        Spot:
+          station === "SHOP" ? "SHOP" : (spot && spot.Spot) || inspection.Spot,
+        UpdatedAt: now,
+        EditedAt: now,
+        _remoteUpdatedAt: payload.expectedUpdatedAt,
+        pending: true,
+      });
+      DATA.completedToday = [
+        updated,
+        ...(DATA.completedToday || []).filter(
+          (row) => String(row.InspectionID) !== String(inspection.InspectionID),
+        ),
+      ];
+      saveAppCache(DATA);
+      const button = form.querySelector("button[type=submit]");
+      button.disabled = true;
+      button.innerHTML =
+        '<span class="spinner small buttonSpinner"></span> Saving…';
+      enqueueOperation("EDIT_INSPECTION", payload, {
+        entityId: inspection.InspectionID,
+        coalesceKey: "edit_inspection_" + inspection.InspectionID,
+        replaceAction: true,
+      })
+        .then(() => {
+          setTimeout(() => {
+            button.disabled = false;
+            button.textContent = "SAVE CHANGES";
+            closeInspectionEditor();
+            renderAll();
+            toast("Inspection changes saved on this device.");
+          }, 500);
+        })
+        .catch((storageError) => {
+          button.disabled = false;
+          button.textContent = "SAVE CHANGES";
+          toast(
+            "Changes could not be stored on this device. " +
+              storageError.message,
+            true,
+          );
+        });
+    };
+
+    window.dismissSyncOperation = function (operationId) {
+      allOperations().then((rows) => {
+        const operation = rows.find((row) => row.id === operationId);
+        if (operation && operation.type === "SEND_NOTES") {
+          NOTES_SENDING = false;
+          DATA.closingNote = null;
+          if (DATA.checklist) DATA.checklist.notesSent = false;
+        }
+        updateOperation(operationId, {
+          status: "synced",
+          requiresAction: false,
+          payload: {},
+          lastError: "Dismissed by user after review.",
+        }).then(() => {
+          renderEditModule();
+          renderNotes();
+          updateSyncIndicator();
+          syncAppData(false, false, true);
+        });
+      });
+    };
+
+    async function renderEditModule() {
+      const list = document.getElementById("editInspectionList");
+      const conflicts = document.getElementById("editSyncIssues");
+      if (!list || !conflicts || !(DATA.user && DATA.user.email)) return;
+      const station = DATA.user.station;
+      const completed = (DATA.completedToday || []).filter(
+        (row) => String(row.WorkingStation || row.Station) === String(station),
+      );
+      list.innerHTML = completed.length
+        ? completed
+            .map(
+              (inspection) =>
+                '<article class="card"><div class="vanIcon">✎</div><div class="cardBody"><h3>' +
+                esc(inspection.VanNumber) +
+                '</h3><div class="meta">' +
+                esc(inspection.Station) +
+                " " +
+                esc(inspection.Spot || "") +
+                " · " +
+                esc(inspection.Status || "") +
+                (inspection.pending ? " · Pending sync" : "") +
+                '</div></div><button class="secondary" onclick="openInspectionEditor(\'' +
+                esc(inspection.InspectionID) +
+                "\')\">EDIT</button></article>",
+            )
+            .join("")
+        : empty("No completed inspections available to edit today.");
+      const issues = (await unsyncedOperations()).filter(
+        (row) => row.requiresAction,
+      );
+      conflicts.innerHTML = issues.length
+        ? '<div class="warning syncIssueHeading">These changes need review because newer remote data exists.</div>' +
+          issues
+            .map(
+              (row) =>
+                '<article class="syncIssue"><div><b>' +
+                esc(row.type.replace(/_/g, " ")) +
+                "</b><small>" +
+                esc(row.lastError || "Synchronization needs review.") +
+                '</small></div><button class="secondary" onclick="dismissSyncOperation(\'' +
+                esc(row.id) +
+                "\')\">USE LATEST DATA</button></article>",
+            )
+            .join("")
+        : "";
+    }
+
+    document.addEventListener("DOMContentLoaded", () => {
+      if (navigator.storage && navigator.storage.persist)
+        navigator.storage.persist().catch(() => {});
+      window.addEventListener("online", () => {
+        processSyncQueue();
+        syncAppData(false, false, true);
+      });
+      window.addEventListener("focus", () => {
+        processSyncQueue();
+        syncAppData(false, false, true);
+      });
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "visible") {
+          processSyncQueue();
+          syncAppData(false, false, true);
+        }
+      });
+      setInterval(() => {
+        if (document.visibilityState === "visible") {
+          processSyncQueue();
+          syncAppData(false, false, false);
+        }
+      }, 30000);
+      const persistCurrentFields = () => {
+        if (!CURRENT || !CURRENT.inspection) return;
+        const status = document.getElementById("vanStatus");
+        const notes = document.getElementById("inspectionNotes");
+        const station = document.getElementById("vanLocation");
+        const spot = document.getElementById("spot");
+        if (status) CURRENT.inspection.Status = status.value;
+        if (notes) CURRENT.inspection.Notes = notes.value;
+        if (station) CURRENT.inspection.Station = station.value;
+        CURRENT.locationDraft = CURRENT.locationDraft || { spotCache: {} };
+        if (station) CURRENT.locationDraft.station = station.value;
+        if (spot) {
+          CURRENT.locationDraft.spotId = spot.value;
+          const option = spot.selectedOptions && spot.selectedOptions[0];
+          CURRENT.locationDraft.spot =
+            spot.value && option ? option.textContent : "";
+        }
+        saveInspectionDraft(CURRENT);
+      };
+      [
+        "vanStatus",
+        "inspectionNotes",
+        "vanLocation",
+        "spot",
+        "damagePanel",
+      ].forEach((id) => {
+        const element = document.getElementById(id);
+        if (!element) return;
+        element.addEventListener("input", persistCurrentFields);
+        element.addEventListener("change", persistCurrentFields);
+      });
+      const inspectionEditForm = document.getElementById("inspectionEditForm");
+      if (inspectionEditForm)
+        inspectionEditForm.addEventListener("input", () => {
+          inspectionEditForm.dataset.dirty = "1";
+        });
+      updateSyncIndicator();
+    });
+  })();
+</script>
