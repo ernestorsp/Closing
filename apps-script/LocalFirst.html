@@ -24,6 +24,18 @@
     let pullRunning = false;
     let retryTimer = null;
     let editRecord = null;
+    let editDamageAnswer = "No";
+    const editPhotoUploads = new Set();
+    const editDamageUploads = new Set();
+    const EDIT_DETAIL_PREFIX = "aaxi_closing_inspection_edit_v1_";
+    const EDIT_REQUIRED_PARTS = [
+      "Front",
+      "Driver Side",
+      "Rear",
+      "Passenger Side",
+      "Cargo Interior",
+      "Cabin Interior",
+    ];
 
     function rescueVersionKey(day, station) {
       return (
@@ -1201,7 +1213,197 @@
       );
     }
 
+    function inspectionEditCacheKey(inspectionId) {
+      return EDIT_DETAIL_PREFIX + String(inspectionId || "");
+    }
+
+    function readInspectionEditCache(inspectionId) {
+      try {
+        const record = JSON.parse(
+          localStorage.getItem(inspectionEditCacheKey(inspectionId)) || "null",
+        );
+        return record && record.inspection ? record : null;
+      } catch (error) {
+        return null;
+      }
+    }
+
+    function cacheInspectionEditRecord(record) {
+      if (!(record && record.inspection)) return;
+      try {
+        localStorage.setItem(
+          inspectionEditCacheKey(record.inspection.InspectionID),
+          JSON.stringify(record),
+        );
+      } catch (error) {}
+    }
+
+    function mergeInspectionEditRecord(remote) {
+      const cached = readInspectionEditCache(remote.inspection.InspectionID);
+      const remotePhotos = remote.photos || [];
+      const photos = new Map(
+        remotePhotos.map((photo) => [String(photo.Part), photo]),
+      );
+      ((cached && cached.photos) || [])
+        .filter(
+          (photo) =>
+            photo.optimistic &&
+            !remotePhotos.some(
+              (saved) =>
+                photo.OperationID &&
+                String(saved.OperationID) === String(photo.OperationID),
+            ),
+        )
+        .forEach((photo) => photos.set(String(photo.Part), photo));
+      const damages = [...(remote.damages || [])];
+      ((cached && cached.damages) || [])
+        .filter(
+          (damage) =>
+            damage.optimistic &&
+            !damages.some(
+              (saved) =>
+                damage.OperationID &&
+                String(saved.OperationID) === String(damage.OperationID),
+            ),
+        )
+        .forEach((damage) => damages.push(damage));
+      return Object.assign({}, remote, {
+        photos: [...photos.values()],
+        damages,
+        requiredParts: remote.requiredParts || EDIT_REQUIRED_PARTS,
+        mediaLoaded: true,
+      });
+    }
+
+    function inspectionEditHasDamage(record) {
+      return (
+        (record.damages || []).length > 0 ||
+        record.inspection.NewDamageFound === "Yes"
+      );
+    }
+
+    function renderInspectionEditSaveState() {
+      const form = document.getElementById("inspectionEditForm");
+      if (!form || !editRecord) return;
+      const inspectionId = String(editRecord.inspection.InspectionID);
+      const processing =
+        [...editPhotoUploads].some((key) =>
+          key.startsWith(inspectionId + "|"),
+        ) || editDamageUploads.has(inspectionId);
+      const missingDamage =
+        editDamageAnswer === "Yes" && !inspectionEditHasDamage(editRecord);
+      form.querySelector("button[type=submit]").disabled =
+        form.dataset.saving === "1" || processing || missingDamage;
+    }
+
+    function renderInspectionEditMedia() {
+      if (!editRecord) return;
+      const inspection = editRecord.inspection;
+      const inspectionId = String(inspection.InspectionID);
+      const photoGrid = document.getElementById("editPhotoGrid");
+      const photos = new Map(
+        (editRecord.photos || []).map((photo) => [String(photo.Part), photo]),
+      );
+      photoGrid.innerHTML = (
+        editRecord.requiredParts || EDIT_REQUIRED_PARTS
+      )
+        .map((part) => {
+          const photo = photos.get(String(part));
+          const uploadKey = inspectionId + "|" + part;
+          const previous =
+            '<button type="button" class="previous" onclick="previousInspectionEditPhoto(\'' +
+            esc(part) +
+            "')\">View previous photo</button>";
+          if (editPhotoUploads.has(uploadKey))
+            return (
+              '<article class="photoCard saving"><div class="savingRow"><span class="spinner small"></span><div><h3>' +
+              esc(part) +
+              '</h3><p class="meta">Preparing photo…</p></div></div></article>'
+            );
+          if (photo) {
+            const view =
+              photo.PhotoID && !photo.optimistic
+                ? '<button type="button" class="previous" onclick="historyPhoto(\'' +
+                  esc(inspectionId) +
+                  "','" +
+                  esc(photo.PhotoID) +
+                  "','" +
+                  esc(part) +
+                  "')\">View photo</button>"
+                : "";
+            return (
+              '<article class="photoCard done"><h3>✓ ' +
+              esc(part) +
+              '</h3><p class="meta">' +
+              (photo.optimistic
+                ? "Photo selected"
+                : "Photo captured " + fmt(photo.CapturedAt)) +
+              '</p><div class="photoActions"><label class="camera">↻ RETAKE PHOTO<input type="file" accept="image/*" capture="environment" onchange="captureInspectionEditPhoto(\'' +
+              esc(part) +
+              "',this,true)\"></label>" +
+              view +
+              previous +
+              "</div></article>"
+            );
+          }
+          return (
+            '<article class="photoCard"><h3>' +
+            esc(part) +
+            '</h3><label class="camera">📷 Take photo<input type="file" accept="image/*" capture="environment" onchange="captureInspectionEditPhoto(\'' +
+            esc(part) +
+            "',this,false)\"></label><div class=\"photoActions\">" +
+            previous +
+            "</div></article>"
+          );
+        })
+        .join("");
+      const hasDamage = inspectionEditHasDamage(editRecord);
+      if (hasDamage) editDamageAnswer = "Yes";
+      document
+        .querySelectorAll('[name="editNewDamage"]')
+        .forEach((input) => {
+          input.checked = input.value === editDamageAnswer;
+          input.disabled = input.value === "No" && hasDamage;
+        });
+      document.getElementById("editDamageForm").hidden =
+        editDamageAnswer !== "Yes";
+      const damageList = document.getElementById("editDamageList");
+      damageList.innerHTML = (editRecord.damages || []).length
+        ? editRecord.damages
+            .map(
+              (damage) =>
+                '<article class="card"><div class="cardBody"><h3>✓ ' +
+                esc(damage.Part) +
+                '</h3><div class="meta">' +
+                esc(damage.Severity || "Defect reported") +
+                "</div></div></article>",
+            )
+            .join("")
+        : hasDamage
+          ? '<span class="meta">Existing damage is recorded.</span>'
+          : '<span class="meta">No defects reported.</span>';
+      renderInspectionEditSaveState();
+    }
+
+    function renderInspectionEditAudit(record) {
+      const form = document.getElementById("inspectionEditForm");
+      const audit = form.querySelector("[data-edit-audit]");
+      audit.textContent = (record.audit || []).length
+        ? "Recent edits: " +
+          record.audit
+            .slice(0, 3)
+            .map(
+              (event) =>
+                fmt(event.Timestamp) + " by " + (event.UserEmail || "Unknown"),
+            )
+            .join(" · ")
+        : "No previous edits recorded.";
+    }
+
     function renderInspectionEditor(record) {
+      record.photos = record.photos || [];
+      record.damages = record.damages || [];
+      record.requiredParts = record.requiredParts || EDIT_REQUIRED_PARTS;
       editRecord = record;
       const inspection = record.inspection;
       const form = document.getElementById("inspectionEditForm");
@@ -1210,6 +1412,7 @@
       list.hidden = true;
       form.hidden = false;
       form.dataset.dirty = "0";
+      form.dataset.saving = "0";
       form.dataset.inspectionId = inspection.InspectionID;
       form.dataset.expectedUpdatedAt =
         inspection._remoteUpdatedAt ||
@@ -1223,17 +1426,13 @@
       form.elements.notes.value = inspection.Notes || "";
       form.elements.station.value = inspection.Station || DATA.user.station;
       renderInspectionEditSpots(inspection.Spot || "");
-      const audit = form.querySelector("[data-edit-audit]");
-      audit.textContent = (record.audit || []).length
-        ? "Recent edits: " +
-          record.audit
-            .slice(0, 3)
-            .map(
-              (event) =>
-                fmt(event.Timestamp) + " by " + (event.UserEmail || "Unknown"),
-            )
-            .join(" · ")
-        : "No previous edits recorded.";
+      editDamageAnswer =
+        record.damages.length || inspection.NewDamageFound === "Yes"
+          ? "Yes"
+          : "No";
+      renderInspectionEditMedia();
+      renderInspectionEditAudit(record);
+      cacheInspectionEditRecord(record);
     }
 
     window.renderInspectionEditSpots = function (selected) {
@@ -1273,16 +1472,45 @@
       );
       if (!inspection)
         return toast("Inspection not found in the saved device data.", true);
-      renderInspectionEditor({ inspection, audit: [] });
+      const cached = readInspectionEditCache(inspectionId);
+      const localRecord = cached || {
+        inspection,
+        photos: [],
+        damages: [],
+        requiredParts: EDIT_REQUIRED_PARTS,
+        audit: [],
+        mediaLoaded: false,
+      };
+      localRecord.inspection = Object.assign(
+        {},
+        localRecord.inspection || {},
+        inspection,
+      );
+      renderInspectionEditor(localRecord);
       if (!navigator.onLine) return;
       google.script.run
         .withSuccessHandler((record) => {
+          const form = document.getElementById("inspectionEditForm");
           if (
-            document.getElementById("inspectionEditForm").dataset.dirty === "1"
+            !editRecord ||
+            String(form.dataset.inspectionId) !== String(inspectionId)
           )
             return;
           if (record && Array.isArray(record.spots)) DATA.spots = record.spots;
-          renderInspectionEditor(record);
+          const merged = mergeInspectionEditRecord(record);
+          if (form.dataset.dirty === "1") {
+            editRecord = merged;
+            form.dataset.expectedUpdatedAt =
+              merged.inspection.UpdatedAt ||
+              merged.inspection.EditedAt ||
+              merged.inspection.CompletedAt ||
+              "";
+            renderInspectionEditMedia();
+            renderInspectionEditAudit(merged);
+            cacheInspectionEditRecord(merged);
+            return;
+          }
+          renderInspectionEditor(merged);
         })
         .withFailureHandler(() => {})
         .getEditableInspection(TOKEN, inspectionId);
@@ -1290,9 +1518,197 @@
 
     window.closeInspectionEditor = function () {
       editRecord = null;
+      editDamageAnswer = "No";
       document.getElementById("inspectionEditForm").hidden = true;
       document.getElementById("inspectedVanList").hidden = false;
       renderInspectedVans();
+    };
+
+    window.editDamageChoiceChanged = function (input) {
+      if (!editRecord) return;
+      if (input.value === "No" && inspectionEditHasDamage(editRecord)) {
+        editDamageAnswer = "Yes";
+        renderInspectionEditMedia();
+        return toast(
+          "Existing damage stays attached to this inspection.",
+          true,
+        );
+      }
+      editDamageAnswer = input.value;
+      document.getElementById("inspectionEditForm").dataset.dirty = "1";
+      renderInspectionEditMedia();
+    };
+
+    window.previousInspectionEditPhoto = function (part) {
+      if (!editRecord) return;
+      const inspectionId = String(editRecord.inspection.InspectionID);
+      document.getElementById("photoModalTitle").textContent =
+        "Previous " + part + " photo";
+      document.getElementById("previousMeta").textContent = "Loading photo…";
+      document.getElementById("previousImage").removeAttribute("src");
+      document.getElementById("photoModal").hidden = false;
+      google.script.run
+        .withSuccessHandler((result) => {
+          if (!result.found) {
+            closeModal();
+            return toast("No previous photo for this position.");
+          }
+          document.getElementById("previousImage").src = result.image;
+          document.getElementById("previousMeta").textContent =
+            fmt(result.capturedAt) +
+            " · " +
+            result.assessment +
+            (result.notes ? " · " + result.notes : "");
+        })
+        .withFailureHandler((error) => {
+          closeModal();
+          toast(error.message || String(error), true);
+        })
+        .getPreviousPhoto(TOKEN, inspectionId, part);
+    };
+
+    window.captureInspectionEditPhoto = function (part, input, replace) {
+      const file = input.files && input.files[0];
+      if (!file || !editRecord) return;
+      const record = editRecord;
+      const inspectionId = String(record.inspection.InspectionID);
+      const uploadKey = inspectionId + "|" + part;
+      if (editPhotoUploads.has(uploadKey)) return;
+      damagePhotoFeedback(input);
+      document.getElementById("inspectionEditForm").dataset.dirty = "1";
+      editPhotoUploads.add(uploadKey);
+      renderInspectionEditMedia();
+      resizeImage(file, 1280, 0.78, (image) => {
+        enqueueOperation(
+          "SAVE_INSPECTION_PHOTO",
+          { inspectionId, part, image, replace: !!replace },
+          {
+            entityId: inspectionId,
+            coalesceKey: "edit_photo_" + inspectionId + "_" + part,
+            replaceAction: true,
+          },
+        )
+          .then((operation) => {
+            const photo = {
+              PhotoID: "photo_" + operation.id,
+              InspectionID: inspectionId,
+              Part: part,
+              CapturedAt: new Date().toISOString(),
+              OperationID: operation.id,
+              optimistic: true,
+            };
+            const applyPhoto = (target) => {
+              target.photos = [
+                photo,
+                ...(target.photos || []).filter(
+                  (saved) => String(saved.Part) !== String(part),
+                ),
+              ];
+            };
+            applyPhoto(record);
+            if (
+              editRecord &&
+              editRecord !== record &&
+              String(editRecord.inspection.InspectionID) === inspectionId
+            )
+              applyPhoto(editRecord);
+            cacheInspectionEditRecord(
+              editRecord &&
+                String(editRecord.inspection.InspectionID) === inspectionId
+                ? editRecord
+                : record,
+            );
+            toast("Optional photo saved on this device.");
+          })
+          .catch((storageError) => {
+            toast(
+              "Optional photo could not be stored on this device. " +
+                storageError.message,
+              true,
+            );
+          })
+          .finally(() => {
+            editPhotoUploads.delete(uploadKey);
+            if (
+              editRecord &&
+              String(editRecord.inspection.InspectionID) === inspectionId
+            )
+              renderInspectionEditMedia();
+          });
+      });
+    };
+
+    window.captureInspectionEditDamage = function (input) {
+      const file = input.files && input.files[0];
+      if (!file || !editRecord) return;
+      const record = editRecord;
+      const inspectionId = String(record.inspection.InspectionID);
+      if (editDamageUploads.has(inspectionId)) return;
+      const part = document.getElementById("editDamagePart").value;
+      const severity = document.getElementById("editDamageSeverity").value;
+      damagePhotoFeedback(input);
+      editDamageAnswer = "Yes";
+      document.getElementById("inspectionEditForm").dataset.dirty = "1";
+      editDamageUploads.add(inspectionId);
+      renderInspectionEditMedia();
+      resizeImage(file, 1280, 0.8, (image) => {
+        enqueueOperation(
+          "SAVE_DAMAGE",
+          { inspectionId, part, severity, image },
+          { entityId: inspectionId },
+        )
+          .then((operation) => {
+            const damage = {
+              DamageID: "damage_" + operation.id,
+              InspectionID: inspectionId,
+              Part: part,
+              Severity: severity,
+              PhotoID: "damage_photo_" + operation.id,
+              OperationID: operation.id,
+              ReportedAt: new Date().toISOString(),
+              optimistic: true,
+            };
+            const applyDamage = (target) => {
+              if (
+                !(target.damages || []).some(
+                  (saved) =>
+                    String(saved.OperationID) === String(operation.id),
+                )
+              )
+                target.damages = [...(target.damages || []), damage];
+              target.inspection.NewDamageFound = "Yes";
+            };
+            applyDamage(record);
+            if (
+              editRecord &&
+              editRecord !== record &&
+              String(editRecord.inspection.InspectionID) === inspectionId
+            )
+              applyDamage(editRecord);
+            cacheInspectionEditRecord(
+              editRecord &&
+                String(editRecord.inspection.InspectionID) === inspectionId
+                ? editRecord
+                : record,
+            );
+            toast("Damage saved on this device.");
+          })
+          .catch((storageError) => {
+            toast(
+              "Damage could not be stored on this device. " +
+                storageError.message,
+              true,
+            );
+          })
+          .finally(() => {
+            editDamageUploads.delete(inspectionId);
+            if (
+              editRecord &&
+              String(editRecord.inspection.InspectionID) === inspectionId
+            )
+              renderInspectionEditMedia();
+          });
+      });
     };
 
     window.saveInspectionEdit = function (event) {
@@ -1300,12 +1716,28 @@
       if (!editRecord) return;
       const form = event.currentTarget;
       const inspection = editRecord.inspection;
+      const inspectionId = String(inspection.InspectionID);
+      if (
+        [...editPhotoUploads].some((key) =>
+          key.startsWith(inspectionId + "|"),
+        ) ||
+        editDamageUploads.has(inspectionId)
+      )
+        return toast("Wait for the selected photo to finish preparing.", true);
+      if (
+        editDamageAnswer === "Yes" &&
+        !inspectionEditHasDamage(editRecord)
+      )
+        return toast("Take a close-up photo of the new damage.", true);
       const station = form.elements.station.value;
       const payload = {
         inspectionId: inspection.InspectionID,
         expectedUpdatedAt: form.dataset.expectedUpdatedAt,
         status: form.elements.status.value,
         notes: form.elements.notes.value,
+        newDamageFound: inspectionEditHasDamage(editRecord)
+          ? "Yes"
+          : editDamageAnswer,
         station,
         spotId: station === "SHOP" ? "" : form.elements.spotId.value,
       };
@@ -1318,6 +1750,7 @@
       const updated = Object.assign({}, inspection, {
         Status: station === "SHOP" ? "Grounded" : payload.status,
         Notes: payload.notes,
+        NewDamageFound: payload.newDamageFound,
         Station: station,
         Spot:
           station === "SHOP" ? "SHOP" : (spot && spot.Spot) || inspection.Spot,
@@ -1334,6 +1767,7 @@
       ];
       saveAppCache(DATA);
       const button = form.querySelector("button[type=submit]");
+      form.dataset.saving = "1";
       button.disabled = true;
       button.innerHTML =
         '<span class="spinner small buttonSpinner"></span> Saving…';
@@ -1344,6 +1778,7 @@
       })
         .then(() => {
           setTimeout(() => {
+            form.dataset.saving = "0";
             button.disabled = false;
             button.textContent = "SAVE CHANGES";
             closeInspectionEditor();
@@ -1352,6 +1787,7 @@
           }, 500);
         })
         .catch((storageError) => {
+          form.dataset.saving = "0";
           button.disabled = false;
           button.textContent = "SAVE CHANGES";
           toast(

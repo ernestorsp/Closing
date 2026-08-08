@@ -371,9 +371,13 @@ function lfRenewInspection_(email, inspectionId, operationId) {
       inspectionId,
     );
     if (!inspection) throw new Error("Inspection not found.");
+    if (inspection.InspectionState === "Completed") {
+      if (!lfCanEditInspection_(user_(email), inspection))
+        throw new Error("Permission required to edit this inspection.");
+      return inspection;
+    }
     if (norm_(inspection.UserEmail) !== norm_(email))
       throw new Error("CONFLICT: inspection belongs to another user.");
-    if (inspection.InspectionState === "Completed") return inspection;
     if (inspection.InspectionState === "Cancelled") {
       update_(
         ss.getSheetByName(APP.SHEETS.inspections),
@@ -422,7 +426,13 @@ function lfSaveInspectionPhoto_(session, input, operationId) {
       "InspectionID",
       input.inspectionId,
     );
-    editable_(inspection, session.email);
+    const completed = inspection.InspectionState === "Completed";
+    if (completed) {
+      if (!lfCanEditInspection_(user_(session.email), inspection))
+        throw new Error("Permission required to edit this inspection.");
+    } else {
+      editable_(inspection, session.email);
+    }
     if (!APP.PARTS.includes(input.part))
       throw new Error("Invalid photo position.");
     if (!/^data:image\/(jpeg|jpg|png);base64,/.test(String(input.image || "")))
@@ -488,15 +498,16 @@ function lfSaveInspectionPhoto_(session, input, operationId) {
         )
         .map((row) => row.Part),
     ).size;
+    const inspectionChanges = {
+      PhotoProgress: count + "/6",
+      LastOperationID: operationId,
+    };
+    if (!completed) inspectionChanges.UpdatedAt = new Date();
     update_(
       ss.getSheetByName(APP.SHEETS.inspections),
       "InspectionID",
       inspection.InspectionID,
-      {
-        PhotoProgress: count + "/6",
-        UpdatedAt: new Date(),
-        LastOperationID: operationId,
-      },
+      inspectionChanges,
     );
     audit_(
       session.email,
@@ -505,6 +516,8 @@ function lfSaveInspectionPhoto_(session, input, operationId) {
       inspection.InspectionID,
       input.part,
     );
+    if (completed)
+      lfClearAppCache_(session.email, workingStation_(user_(session.email)));
     return lfInspectionData_(ss, inspection.InspectionID, session.email);
   });
 }
@@ -520,7 +533,13 @@ function lfSaveDamage_(session, input, operationId) {
       "InspectionID",
       input.inspectionId,
     );
-    editable_(inspection, session.email);
+    const completed = inspection.InspectionState === "Completed";
+    if (completed) {
+      if (!lfCanEditInspection_(user_(session.email), inspection))
+        throw new Error("Permission required to edit this inspection.");
+    } else {
+      editable_(inspection, session.email);
+    }
     const part = String(input.part || "").trim();
     if (!APP.DEFECTS.includes(part))
       throw new Error("Select the van defect or affected part.");
@@ -564,14 +583,16 @@ function lfSaveDamage_(session, input, operationId) {
       ResolutionStatus: "Open",
       OperationID: operationId,
     });
+    const inspectionChanges = {
+      NewDamageFound: "Yes",
+      LastOperationID: operationId,
+    };
+    if (!completed) inspectionChanges.UpdatedAt = new Date();
     update_(
       ss.getSheetByName(APP.SHEETS.inspections),
       "InspectionID",
       inspection.InspectionID,
-      {
-        UpdatedAt: new Date(),
-        LastOperationID: operationId,
-      },
+      inspectionChanges,
     );
     audit_(
       session.email,
@@ -580,6 +601,8 @@ function lfSaveDamage_(session, input, operationId) {
       inspection.InspectionID,
       part,
     );
+    if (completed)
+      lfClearAppCache_(session.email, workingStation_(user_(session.email)));
     return lfInspectionData_(ss, inspection.InspectionID, session.email);
   });
 }
@@ -1262,12 +1285,32 @@ function lfEditInspection_(session, input, operationId) {
       spot = String(spotRow.Spot);
     }
     const notes = String(input.notes || "").trim();
+    const hasDamage = rows_(ss.getSheetByName(APP.SHEETS.damages)).some(
+      (damage) =>
+        String(damage.InspectionID) === String(inspection.InspectionID),
+    );
+    let newDamageFound = String(input.newDamageFound || "");
+    if (hasDamage) newDamageFound = "Yes";
+    if (!["Yes", "No"].includes(newDamageFound))
+      throw new Error("Select whether new damage was found.");
+    if (
+      newDamageFound === "Yes" &&
+      !hasDamage &&
+      inspection.NewDamageFound !== "Yes"
+    )
+      throw new Error("Take a close-up photo of the new damage.");
     const now = new Date();
     const version = Number(inspection.Version || 0) + 1;
     const changed = lfChangedFields_(
       inspection,
-      { Station: station, Spot: spot, Status: status, Notes: notes },
-      ["Station", "Spot", "Status", "Notes"],
+      {
+        Station: station,
+        Spot: spot,
+        Status: status,
+        Notes: notes,
+        NewDamageFound: newDamageFound,
+      },
+      ["Station", "Spot", "Status", "Notes", "NewDamageFound"],
     );
     clearVanSpot_(ss, inspection.VanID);
     if (!atShop) {
@@ -1283,6 +1326,7 @@ function lfEditInspection_(session, input, operationId) {
         Spot: spot,
         Status: status,
         Notes: notes,
+        NewDamageFound: newDamageFound,
         UpdatedAt: now,
         EditedAt: now,
         EditedByEmail: session.email,
@@ -1345,6 +1389,17 @@ function getEditableInspection(token, inspectionId) {
     throw new Error("Permission required to edit this inspection.");
   return {
     inspection,
+    photos: rows_(ss.getSheetByName(APP.SHEETS.photos)).filter(
+      (photo) =>
+        String(photo.InspectionID) === String(inspectionId) &&
+        APP.PARTS.includes(photo.Part),
+    ),
+    damages: rows_(ss.getSheetByName(APP.SHEETS.damages)).filter(
+      (damage) => String(damage.InspectionID) === String(inspectionId),
+    ),
+    requiredParts: APP.PARTS,
+    statuses: APP.STATUSES,
+    mediaLoaded: true,
     spots: rows_(ss.getSheetByName(APP.SHEETS.spots))
       .filter((spot) => yes_(spot.Active))
       .map((spot) => ({

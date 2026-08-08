@@ -55,6 +55,9 @@ test("inspected vans are searchable while Closing and Rescue edit in place", () 
   assert.match(index, /id="inspectedVanSearch"/);
   assert.match(index, /id="inspectedVanList"/);
   assert.match(index, /id="inspectionEditForm"/);
+  assert.match(index, /id="editPhotoGrid"/);
+  assert.match(index, /id="editDamagePanel"/);
+  assert.match(index, /captureInspectionEditDamage/);
   assert.doesNotMatch(index, /editModuleGrid|EDIT CLOSING|EDIT RESCUE/);
   assert.match(frontend, /function renderInspectedVans\(\)/);
   assert.match(frontend, /inspection\.VanNumber/);
@@ -63,6 +66,12 @@ test("inspected vans are searchable while Closing and Rescue edit in place", () 
   assert.match(frontend, /renderClosingSaveState/);
   assert.match(frontend, /Send the Closing Notes anyway/);
   assert.doesNotMatch(frontend, /button\.disabled\s*=.*!ready/);
+  assert.match(frontend, /captureInspectionEditPhoto/);
+  assert.match(frontend, /enqueueOperation\(\s*"SAVE_INSPECTION_PHOTO"/);
+  assert.match(frontend, /enqueueOperation\(\s*"SAVE_DAMAGE"/);
+  assert.match(backend, /mediaLoaded:\s*true/);
+  assert.match(backend, /NewDamageFound:\s*newDamageFound/);
+  assert.match(backend, /lfCanEditInspection_\(user_\(session\.email\), inspection\)/);
 });
 
 test("background synchronization stays invisible to the customer", () => {
