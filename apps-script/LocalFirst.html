@@ -8,6 +8,8 @@
     const STORE = "operations";
     const FALLBACK_KEY = "aaxi_closing_outbox_v1";
     const RESCUE_VERSION_PREFIX = "aaxi_closing_rescue_version_v1";
+    const CLOSING_CONFLICT_RETRY_KEY =
+      "aaxi_closing_conflict_recovery_v1";
     const originals = {
       applyAppData,
       loadApp,
@@ -24,6 +26,7 @@
     let pullRunning = false;
     let retryTimer = null;
     let editRecord = null;
+    let closingConflictRecoveryRunning = false;
     let editDamageAnswer = "No";
     const editPhotoUploads = new Set();
     const editDamageUploads = new Set();
@@ -185,6 +188,39 @@
             }),
           ),
       );
+    }
+
+    async function recoverOwnClosingConflict() {
+      const email = String((DATA.user && DATA.user.email) || "").toLowerCase();
+      if (!email || closingConflictRecoveryRunning) return;
+      const recoveryKey = CLOSING_CONFLICT_RETRY_KEY + "_" + email;
+      if (localStorage.getItem(recoveryKey)) return;
+      closingConflictRecoveryRunning = true;
+      try {
+        const rows = (await unsyncedOperations()).filter(
+          (operation) =>
+            operation.type === "SAVE_CLOSING" &&
+            operation.requiresAction &&
+            /Closing was changed by another user/i.test(
+              String(operation.lastError || ""),
+            ),
+        );
+        if (!rows.length) return;
+        localStorage.setItem(recoveryKey, new Date().toISOString());
+        await Promise.all(
+          rows.map((operation) =>
+            updateOperation(operation.id, {
+              status: "retry",
+              requiresAction: false,
+              nextAttemptAt: Date.now(),
+              lastError: "",
+            }),
+          ),
+        );
+        processSyncQueue();
+      } finally {
+        closingConflictRecoveryRunning = false;
+      }
     }
 
     async function enqueueOperation(type, payload, options) {
@@ -695,6 +731,7 @@
         );
         renderNotes();
       });
+      recoverOwnClosingConflict();
       fetchMetadata();
     };
 
@@ -977,8 +1014,7 @@
       originals.renderClosingSaveState();
       const meta = document.getElementById("closingSaveMeta");
       if (meta && DATA.closingData && DATA.closingData.pending)
-        meta.textContent =
-          "Saved on this device · Remote synchronization is pending.";
+        meta.textContent = "Changes saved.";
     };
 
     saveClosingData = function (event) {
