@@ -15,6 +15,14 @@ const index = fs.readFileSync(
   path.join(__dirname, "..", "apps-script", "Index.html"),
   "utf8",
 );
+const scripts = fs.readFileSync(
+  path.join(__dirname, "..", "apps-script", "Scripts.html"),
+  "utf8",
+);
+const legacyBackend = fs.readFileSync(
+  path.join(__dirname, "..", "apps-script", "Code.gs"),
+  "utf8",
+);
 
 test("every queued operation type is accepted by the idempotent backend", () => {
   const queued = [
@@ -65,4 +73,23 @@ test("background synchronization stays invisible to the customer", () => {
   assert.doesNotMatch(frontend, /These changes need review/);
   assert.match(frontend, /if \(manual\) setSyncState\(true\)/);
   assert.match(frontend, /if \(manual\) setSyncState\(false\)/);
+});
+
+test("DJX4 omits receipt drivers and empty DVIC is N/A in email", () => {
+  assert.match(index, /id="driversWithReceiptsWrap"/);
+  assert.match(scripts, /receiptsWrap\.hidden=isDjx4/);
+  assert.match(scripts, /x\.station!==\'DJX4\'&&!x\.driversWithReceipts/);
+  assert.match(backend, /station === "DJX4"\s*\? ""/);
+  assert.match(
+    legacyBackend,
+    /DriversWithReceipts:station===\'DJX4\'\?\'\':intRange_/,
+  );
+  assert.match(
+    legacyBackend,
+    /receiptsDetail=station===\'DJX4\'\?\'\':detail\(\'Drivers with Receipts\'/,
+  );
+  assert.match(
+    legacyBackend,
+    /dvicValue=String\(data\.DVICDrivers\|\|\'\'\)\.trim\(\)\|\|\'N\/A\'/,
+  );
 });
