@@ -672,7 +672,7 @@
       DATA.rescueVersion = Number(
         DATA.rescueVersion || localStorage.getItem(rescueVersionKey()) || 0,
       );
-      renderEditModule();
+      renderInspectedVans();
       unsyncedOperations().then((operations) => {
         NOTES_SENDING = operations.some(
           (operation) =>
@@ -688,12 +688,12 @@
 
     renderAll = function () {
       originals.renderAll();
-      renderEditModule();
+      renderInspectedVans();
     };
 
     showPage = function (id) {
       originals.showPage(id);
-      if (id === "edit") renderEditModule();
+      if (id === "inspected") renderInspectedVans();
     };
 
     function inspectionDraftKey(id) {
@@ -1205,7 +1205,7 @@
       editRecord = record;
       const inspection = record.inspection;
       const form = document.getElementById("inspectionEditForm");
-      const list = document.getElementById("editInspectionList");
+      const list = document.getElementById("inspectedVanList");
       if (!form || !list) return;
       list.hidden = true;
       form.hidden = false;
@@ -1291,8 +1291,8 @@
     window.closeInspectionEditor = function () {
       editRecord = null;
       document.getElementById("inspectionEditForm").hidden = true;
-      document.getElementById("editInspectionList").hidden = false;
-      renderEditModule();
+      document.getElementById("inspectedVanList").hidden = false;
+      renderInspectedVans();
     };
 
     window.saveInspectionEdit = function (event) {
@@ -1362,12 +1362,21 @@
         });
     };
 
-    async function renderEditModule() {
-      const list = document.getElementById("editInspectionList");
+    function renderInspectedVans() {
+      const list = document.getElementById("inspectedVanList");
       if (!list || !(DATA.user && DATA.user.email)) return;
       const station = DATA.user.station;
-      const completed = (DATA.completedToday || []).filter(
+      const search = document.getElementById("inspectedVanSearch");
+      const query = String((search && search.value) || "")
+        .trim()
+        .toLowerCase();
+      const inspected = (DATA.completedToday || []).filter(
         (row) => String(row.WorkingStation || row.Station) === String(station),
+      );
+      const completed = inspected.filter((inspection) =>
+        String(inspection.VanNumber || "")
+          .toLowerCase()
+          .includes(query),
       );
       list.innerHTML = completed.length
         ? completed
@@ -1386,8 +1395,14 @@
                 "\')\">EDIT</button></article>",
             )
             .join("")
-        : empty("No completed inspections available to edit today.");
+        : empty(
+            query
+              ? "No inspected vans match that number."
+              : "No inspected vans today.",
+          );
     }
+
+    window.renderInspectedVans = renderInspectedVans;
 
     document.addEventListener("DOMContentLoaded", () => {
       if (navigator.storage && navigator.storage.persist)

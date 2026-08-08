@@ -18,7 +18,7 @@ Mobile-first Google Apps Script web app for daily van closing inspections.
 - Daily closing data with automatic van-status counts
 - Closing notes can be sent with available data after confirming a pending-items warning
 - Persistent local-first outbox with automatic retries, idempotency, and foreground/connectivity sync
-- Controlled Edit module for completed Inspections, Closing, and Rescue records
+- Searchable Inspected Vans page for correcting completed inspections; Closing and Rescue remain editable in their own sections
 - Conflict detection and audit details for concurrent edits
 - HTML Closing Notes email with table formatting and up to six photo attachments
 - Closing Notes fleet sections listing Operational vans, Downed/Grounded vans with their status notes, and station-owned vans currently at SHOP
