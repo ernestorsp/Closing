@@ -1293,7 +1293,11 @@ function lfEditInspection_(session, input, operationId) {
     if (hasDamage) newDamageFound = "Yes";
     if (!["Yes", "No"].includes(newDamageFound))
       throw new Error("Select whether new damage was found.");
-    if (newDamageFound === "Yes" && !hasDamage)
+    if (
+      newDamageFound === "Yes" &&
+      !hasDamage &&
+      inspection.NewDamageFound !== "Yes"
+    )
       throw new Error("Take a close-up photo of the new damage.");
     const now = new Date();
     const version = Number(inspection.Version || 0) + 1;
