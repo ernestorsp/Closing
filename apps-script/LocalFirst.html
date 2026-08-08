@@ -23,7 +23,6 @@
     let queueRunning = false;
     let pullRunning = false;
     let retryTimer = null;
-    let lastSyncedAt = 0;
     let editRecord = null;
 
     function rescueVersionKey(day, station) {
@@ -205,7 +204,6 @@
         coalesced.lastError = "";
         coalesced.requiresAction = false;
         await putOperation(coalesced);
-        updateSyncIndicator();
         processSyncQueue();
         return coalesced;
       }
@@ -217,7 +215,6 @@
         day: DATA.today || "",
       });
       await putOperation(operation);
-      updateSyncIndicator();
       processSyncQueue();
       return operation;
     }
@@ -453,18 +450,15 @@
 
     async function processSyncQueue(manual) {
       if (queueRunning || !TOKEN || !navigator.onLine) {
-        updateSyncIndicator();
         return;
       }
       queueRunning = true;
-      updateSyncIndicator();
       try {
         let operation = await nextOperation();
         while (operation && navigator.onLine && TOKEN) {
           operation.status = "syncing";
           operation.updatedAt = Date.now();
           await putOperation(operation);
-          updateSyncIndicator();
           try {
             const response = await serverOperation(operation);
             await applyOperationResult(operation, response);
@@ -474,7 +468,6 @@
             operation.requiresAction = false;
             operation.syncedAt = Date.now();
             await putOperation(operation);
-            lastSyncedAt = Date.now();
           } catch (error) {
             const info = CORE.errorInfo(error);
             operation.attempts = Number(operation.attempts || 0) + 1;
@@ -485,13 +478,6 @@
               ? Number.MAX_SAFE_INTEGER
               : Date.now() + CORE.retryDelay(operation.attempts);
             await putOperation(operation);
-            if (info.requiresAction)
-              toast(
-                info.conflict
-                  ? "Another user saved a newer version. Review it in Edit before trying again."
-                  : info.message,
-                true,
-              );
             if (/AUTH_REQUIRED/.test(info.message)) {
               authFail(error);
               break;
@@ -501,7 +487,6 @@
         }
       } finally {
         queueRunning = false;
-        updateSyncIndicator();
         const rows = await unsyncedOperations();
         const retryAt = rows
           .filter((row) => !row.requiresAction)
@@ -520,31 +505,8 @@
           document.visibilityState === "visible"
         ) {
           setTimeout(() => syncAppData(!!manual, false, true), 250);
-        } else if (manual && rows.some((row) => row.requiresAction)) {
-          toast(
-            "Some changes need review before they can be synchronized.",
-            true,
-          );
         }
       }
-    }
-
-    async function updateSyncIndicator() {
-      const status = document.getElementById("syncStatus");
-      if (!status) return;
-      const rows = await unsyncedOperations();
-      const action = rows.filter((row) => row.requiresAction).length;
-      status.classList.toggle("hasPending", rows.length > 0);
-      status.classList.toggle("needsAction", action > 0);
-      if (action) status.textContent = action + " needs review";
-      else if (queueRunning || pullRunning) status.textContent = "Syncing…";
-      else if (rows.length) status.textContent = rows.length + " pending";
-      else
-        status.textContent = lastSyncedAt
-          ? "Synced"
-          : navigator.onLine
-            ? "Ready"
-            : "Offline";
     }
 
     function serverGetAppData(force) {
@@ -634,8 +596,7 @@
     syncAppData = async function (manual, blocking, force) {
       if (pullRunning || !TOKEN || !navigator.onLine) {
         if (manual && !navigator.onLine)
-          toast("You are offline. Changes remain pending on this device.");
-        updateSyncIndicator();
+          toast("There is no connection right now. Your work is safe.");
         return;
       }
       let pending = await unsyncedOperations();
@@ -645,7 +606,7 @@
         pending = await unsyncedOperations();
       }
       pullRunning = true;
-      setSyncState(true);
+      if (manual) setSyncState(true);
       try {
         const data = mergePendingSnapshot(
           await serverGetAppData(!!manual || !!force),
@@ -653,7 +614,6 @@
         );
         saveAppCache(data);
         applyAppData(data);
-        lastSyncedAt = Date.now();
         if (manual) toast("Everything is synchronized.");
       } catch (error) {
         showSessionLoading(false);
@@ -668,8 +628,7 @@
           );
       } finally {
         pullRunning = false;
-        setSyncState(false);
-        updateSyncIndicator();
+        if (manual) setSyncState(false);
       }
     };
 
@@ -682,7 +641,6 @@
         const label = button.querySelector(".syncLabel");
         if (label) label.textContent = syncing ? "Syncing…" : "Sync now";
       }
-      updateSyncIndicator();
     };
 
     manualSync = function () {
@@ -715,7 +673,6 @@
         DATA.rescueVersion || localStorage.getItem(rescueVersionKey()) || 0,
       );
       renderEditModule();
-      updateSyncIndicator();
       unsyncedOperations().then((operations) => {
         NOTES_SENDING = operations.some(
           (operation) =>
@@ -732,7 +689,6 @@
     renderAll = function () {
       originals.renderAll();
       renderEditModule();
-      updateSyncIndicator();
     };
 
     showPage = function (id) {
@@ -990,7 +946,7 @@
             renderAll();
             showPage("pending");
             toast(
-              "Inspection saved on this device. Synchronization continues in the background.",
+              "Inspection completed.",
             );
           }, 500);
         })
@@ -1071,7 +1027,7 @@
             renderClosingData();
             renderClosingSaveState();
             toast(
-              "Closing saved on this device. Synchronization continues in the background.",
+              "Closing saved.",
             );
           }, 500);
         })
@@ -1135,7 +1091,7 @@
             RESCUE_SAVING = false;
             renderRescues();
             toast(
-              "Rescues saved on this device. Synchronization continues in the background.",
+              "Rescues saved.",
             );
           }, 500);
         })
@@ -1164,13 +1120,11 @@
       const pending = CORE.pendingChecklist(DATA.checklist, NOTE_PHOTO_LOADING);
       text.disabled = sent || NOTES_SENDING;
       button.disabled = sent || NOTES_SENDING;
-      button.textContent = NOTES_SENDING
-        ? "Saved · Sending in background…"
-        : "SEND CLOSING NOTES";
+      button.textContent = NOTES_SENDING ? "SAVED" : "SEND CLOSING NOTES";
       meta.textContent = sent
         ? "Ready · Closing notes and email were sent for today."
         : NOTES_SENDING
-          ? "Saved on this device. Email delivery is pending."
+          ? "Closing Notes saved."
           : pending.length
             ? "You can send now; a warning will list " +
               pending.length +
@@ -1187,25 +1141,6 @@
       const notes = document.getElementById("closingNotesText").value.trim();
       if (!notes) return toast("Write the closing notes before sending.", true);
       const pending = CORE.pendingChecklist(DATA.checklist, NOTE_PHOTO_LOADING);
-      const queued = await unsyncedOperations();
-      const queuedUploads = queued.filter((operation) =>
-        ["SAVE_INSPECTION_PHOTO", "SAVE_DAMAGE"].includes(operation.type),
-      ).length;
-      if (queuedUploads) pending.push("inspection photos still pending upload");
-      if (queued.some((operation) => operation.type === "SAVE_CLOSING"))
-        pending.push("Closing changes pending synchronization");
-      if (queued.some((operation) => operation.type === "SAVE_RESCUES"))
-        pending.push("Rescue changes pending synchronization");
-      if (
-        queued.some((operation) =>
-          ["START_INSPECTION", "FINISH_INSPECTION", "EDIT_INSPECTION"].includes(
-            operation.type,
-          ),
-        )
-      )
-        pending.push("inspection changes pending synchronization");
-      if (queued.some((operation) => operation.requiresAction))
-        pending.push("changes that require review");
       if (
         pending.length &&
         !confirm(
@@ -1240,7 +1175,7 @@
           setTimeout(() => {
             renderNotes();
             toast(
-              "Closing Notes saved. Email delivery continues in the background.",
+              "Closing Notes saved.",
             );
           }, 500);
         })
@@ -1427,32 +1362,9 @@
         });
     };
 
-    window.dismissSyncOperation = function (operationId) {
-      allOperations().then((rows) => {
-        const operation = rows.find((row) => row.id === operationId);
-        if (operation && operation.type === "SEND_NOTES") {
-          NOTES_SENDING = false;
-          DATA.closingNote = null;
-          if (DATA.checklist) DATA.checklist.notesSent = false;
-        }
-        updateOperation(operationId, {
-          status: "synced",
-          requiresAction: false,
-          payload: {},
-          lastError: "Dismissed by user after review.",
-        }).then(() => {
-          renderEditModule();
-          renderNotes();
-          updateSyncIndicator();
-          syncAppData(false, false, true);
-        });
-      });
-    };
-
     async function renderEditModule() {
       const list = document.getElementById("editInspectionList");
-      const conflicts = document.getElementById("editSyncIssues");
-      if (!list || !conflicts || !(DATA.user && DATA.user.email)) return;
+      if (!list || !(DATA.user && DATA.user.email)) return;
       const station = DATA.user.station;
       const completed = (DATA.completedToday || []).filter(
         (row) => String(row.WorkingStation || row.Station) === String(station),
@@ -1469,31 +1381,12 @@
                 esc(inspection.Spot || "") +
                 " · " +
                 esc(inspection.Status || "") +
-                (inspection.pending ? " · Pending sync" : "") +
                 '</div></div><button class="secondary" onclick="openInspectionEditor(\'' +
                 esc(inspection.InspectionID) +
                 "\')\">EDIT</button></article>",
             )
             .join("")
         : empty("No completed inspections available to edit today.");
-      const issues = (await unsyncedOperations()).filter(
-        (row) => row.requiresAction,
-      );
-      conflicts.innerHTML = issues.length
-        ? '<div class="warning syncIssueHeading">These changes need review because newer remote data exists.</div>' +
-          issues
-            .map(
-              (row) =>
-                '<article class="syncIssue"><div><b>' +
-                esc(row.type.replace(/_/g, " ")) +
-                "</b><small>" +
-                esc(row.lastError || "Synchronization needs review.") +
-                '</small></div><button class="secondary" onclick="dismissSyncOperation(\'' +
-                esc(row.id) +
-                "\')\">USE LATEST DATA</button></article>",
-            )
-            .join("")
-        : "";
     }
 
     document.addEventListener("DOMContentLoaded", () => {
@@ -1555,7 +1448,6 @@
         inspectionEditForm.addEventListener("input", () => {
           inspectionEditForm.dataset.dirty = "1";
         });
-      updateSyncIndicator();
     });
   })();
 </script>
