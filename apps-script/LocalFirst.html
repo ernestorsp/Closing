@@ -1278,7 +1278,7 @@
     function inspectionEditHasDamage(record) {
       return (
         (record.damages || []).length > 0 ||
-        (!record.mediaLoaded && record.inspection.NewDamageFound === "Yes")
+        record.inspection.NewDamageFound === "Yes"
       );
     }
 
