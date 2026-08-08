@@ -47,3 +47,13 @@ test("Edit navigation and pending-note warning are present", () => {
   assert.match(frontend, /Send the Closing Notes anyway/);
   assert.doesNotMatch(frontend, /button\.disabled\s*=.*!ready/);
 });
+
+test("background synchronization stays invisible to the customer", () => {
+  assert.doesNotMatch(index, /id="syncStatus"/);
+  assert.doesNotMatch(index, /id="editSyncIssues"/);
+  assert.doesNotMatch(frontend, /Pending sync/);
+  assert.doesNotMatch(frontend, /changes that require review/);
+  assert.doesNotMatch(frontend, /These changes need review/);
+  assert.match(frontend, /if \(manual\) setSyncState\(true\)/);
+  assert.match(frontend, /if \(manual\) setSyncState\(false\)/);
+});
