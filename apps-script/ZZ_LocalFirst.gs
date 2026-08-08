@@ -641,7 +641,13 @@ function lfSaveClosing_(session, input, operationId) {
     const existing = closingRecord_(ss, date, station);
     const expected = input.expectedUpdatedAt || input.expectedSavedAt || "";
     const actual = existing && (existing.UpdatedAt || existing.SavedAt);
-    if (existing && (!expected || !lfSameMoment_(expected, actual)))
+    const sameEditor =
+      existing && norm_(existing.SavedByEmail) === norm_(session.email);
+    if (
+      existing &&
+      (!expected || !lfSameMoment_(expected, actual)) &&
+      !sameEditor
+    )
       throw new Error(
         "CONFLICT: Closing was changed by another user. Synchronize and review the newer version.",
       );
