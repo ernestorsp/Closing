@@ -666,12 +666,15 @@ function lfSaveClosing_(session, input, operationId) {
         pickup === "No" ? String(input.pickupComment || "").trim() : "",
       Phones: intRange_(input.phones, 1, 100, "Phones"),
       BatteryPacks: intRange_(input.batteryPacks, 1, 100, "Battery Packs"),
-      DriversWithReceipts: intRange_(
-        input.driversWithReceipts,
-        1,
-        25,
-        "Drivers with Receipts",
-      ),
+      DriversWithReceipts:
+        station === "DJX4"
+          ? ""
+          : intRange_(
+              input.driversWithReceipts,
+              1,
+              25,
+              "Drivers with Receipts",
+            ),
       ReturnedPackages: intRange_(
         input.returnedPackages,
         0,
