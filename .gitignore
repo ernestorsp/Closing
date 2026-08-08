@@ -1,0 +1,8 @@
+node_modules/
+cloud-run-api/node_modules/
+migration/scripts/node_modules/
+web/dist/
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+*.local
