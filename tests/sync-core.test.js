@@ -42,6 +42,13 @@ test("retry delay grows progressively and is capped", () => {
   assert.equal(core.retryDelay(20, 0.5), 300000);
 });
 
+test("slow Drive operations get a longer client timeout", () => {
+  assert.equal(core.operationTimeout("SAVE_CLOSING"), 75000);
+  assert.equal(core.operationTimeout("SAVE_INSPECTION_PHOTO"), 120000);
+  assert.equal(core.operationTimeout("SAVE_DAMAGE"), 120000);
+  assert.equal(core.operationTimeout("SEND_NOTES"), 120000);
+});
+
 test("conflicts require explicit user review", () => {
   const conflict = core.errorInfo(
     new Error("CONFLICT: changed by another user"),
@@ -50,6 +57,19 @@ test("conflicts require explicit user review", () => {
   assert.equal(conflict.requiresAction, true);
   const network = core.errorInfo(new Error("Synchronization timed out"));
   assert.equal(network.requiresAction, false);
+  const busy = core.errorInfo(
+    new Error("SYNC_BUSY: operation is already syncing"),
+  );
+  assert.equal(busy.busy, true);
+  assert.equal(busy.requiresAction, false);
+  const temporaryQuota = core.errorInfo(
+    new Error("Service invoked too many times in a short time"),
+  );
+  assert.equal(temporaryQuota.requiresAction, false);
+  const dailyEmailQuota = core.errorInfo(
+    new Error("Not enough email quota remains to send Closing Notes today."),
+  );
+  assert.equal(dailyEmailQuota.requiresAction, true);
   const validation = core.errorInfo(new Error("Select an available spot."));
   assert.equal(validation.requiresAction, true);
 });

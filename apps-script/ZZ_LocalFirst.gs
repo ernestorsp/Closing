@@ -1,7 +1,7 @@
 const LOCAL_FIRST = {
   OPERATIONS_SHEET: "SYNC_OPERATIONS",
   METADATA_SHEET: "SYNC_METADATA",
-  PROCESSING_TIMEOUT_MS: 2 * 60 * 1000,
+  PROCESSING_TIMEOUT_MS: 4 * 60 * 1000,
   TYPES: [
     "START_INSPECTION",
     "SAVE_INSPECTION_PHOTO",
@@ -13,6 +13,8 @@ const LOCAL_FIRST = {
     "EDIT_INSPECTION",
   ],
 };
+
+let lfSheetsEnsuredForExecution_ = false;
 
 function lfEnsureColumns_(sheet, headers) {
   if (!sheet) throw new Error("Required data sheet is missing.");
@@ -29,6 +31,7 @@ function lfEnsureColumns_(sheet, headers) {
 }
 
 function lfEnsureSheets_(ss) {
+  if (lfSheetsEnsuredForExecution_) return;
   ensureSheet_(ss, LOCAL_FIRST.OPERATIONS_SHEET, [
     "OperationID",
     "Type",
@@ -70,6 +73,7 @@ function lfEnsureSheets_(ss) {
   ]);
   lfEnsureColumns_(ss.getSheetByName(APP.SHEETS.photos), ["OperationID"]);
   lfEnsureColumns_(ss.getSheetByName(APP.SHEETS.damages), ["OperationID"]);
+  lfSheetsEnsuredForExecution_ = true;
 }
 
 function lfSafeOperationId_(value) {
@@ -1255,9 +1259,22 @@ function lfEditInspection_(session, input, operationId) {
       throw new Error("Permission required to edit this inspection.");
     const actualVersion =
       inspection.UpdatedAt || inspection.EditedAt || inspection.CompletedAt;
+    const expectedVersion = Number(input.expectedVersion || 0);
+    const storedVersion = Number(inspection.Version || 0);
+    const versionIsCurrent =
+      expectedVersion > 0 && expectedVersion === storedVersion;
+    const timestampIsCurrent =
+      !!input.expectedUpdatedAt &&
+      lfSameMoment_(input.expectedUpdatedAt, actualVersion);
+    const stale = expectedVersion > 0 ? !versionIsCurrent : !timestampIsCurrent;
+    const sameEditor =
+      inspection.EditedByEmail &&
+      norm_(inspection.EditedByEmail) === norm_(session.email);
+    const neverEdited = !norm_(inspection.EditedByEmail);
     if (
-      !input.expectedUpdatedAt ||
-      !lfSameMoment_(input.expectedUpdatedAt, actualVersion)
+      stale &&
+      !sameEditor &&
+      !neverEdited
     )
       throw new Error(
         "CONFLICT: this inspection has a newer version. Synchronize before saving your changes.",

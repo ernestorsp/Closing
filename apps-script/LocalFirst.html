@@ -9,7 +9,8 @@
     const FALLBACK_KEY = "aaxi_closing_outbox_v1";
     const RESCUE_VERSION_PREFIX = "aaxi_closing_rescue_version_v1";
     const CLOSING_CONFLICT_RETRY_KEY =
-      "aaxi_closing_conflict_recovery_v1";
+      "aaxi_closing_conflict_recovery_v2";
+    const BACKGROUND_PULL_MIN_INTERVAL_MS = 10000;
     const originals = {
       applyAppData,
       loadApp,
@@ -25,6 +26,7 @@
     let queueRunning = false;
     let pullRunning = false;
     let retryTimer = null;
+    let lastBackgroundPullAt = 0;
     let editRecord = null;
     let closingConflictRecoveryRunning = false;
     let editDamageAnswer = "No";
@@ -199,11 +201,15 @@
       try {
         const rows = (await unsyncedOperations()).filter(
           (operation) =>
-            operation.type === "SAVE_CLOSING" &&
             operation.requiresAction &&
-            /Closing was changed by another user/i.test(
-              String(operation.lastError || ""),
-            ),
+            ((operation.type === "SAVE_CLOSING" &&
+              /Closing was changed by another user/i.test(
+                String(operation.lastError || ""),
+              )) ||
+              (operation.type === "EDIT_INSPECTION" &&
+                /inspection has a newer version/i.test(
+                  String(operation.lastError || ""),
+                ))),
         );
         if (!rows.length) return;
         localStorage.setItem(recoveryKey, new Date().toISOString());
@@ -278,7 +284,7 @@
               "Synchronization timed out. It will retry automatically.",
             ),
           );
-        }, 30000);
+        }, CORE.operationTimeout(operation.type));
         google.script.run
           .withSuccessHandler((result) => {
             if (settled) return;
@@ -408,14 +414,21 @@
         operation.type === "FINISH_INSPECTION" ||
         operation.type === "EDIT_INSPECTION"
       ) {
-        if (operation.type === "FINISH_INSPECTION" && result.inspection)
+        if (operation.type === "FINISH_INSPECTION" && result.inspection) {
           await rewriteLaterExpected(
             operation,
             "expectedUpdatedAt",
             result.inspection.UpdatedAt || result.inspection.CompletedAt,
             "EDIT_INSPECTION",
           );
-        if (operation.type === "EDIT_INSPECTION" && result.inspection)
+          await rewriteLaterExpected(
+            operation,
+            "expectedVersion",
+            Number(result.inspection.Version || 0),
+            "EDIT_INSPECTION",
+          );
+        }
+        if (operation.type === "EDIT_INSPECTION" && result.inspection) {
           await rewriteLaterExpected(
             operation,
             "expectedUpdatedAt",
@@ -423,6 +436,12 @@
               result.inspection.EditedAt ||
               result.inspection.CompletedAt,
           );
+          await rewriteLaterExpected(
+            operation,
+            "expectedVersion",
+            Number(result.inspection.Version || 0),
+          );
+        }
         if (result.inspection) {
           DATA.completedToday = [
             result.inspection,
@@ -518,13 +537,15 @@
             await putOperation(operation);
           } catch (error) {
             const info = CORE.errorInfo(error);
-            operation.attempts = Number(operation.attempts || 0) + 1;
+            if (!info.busy)
+              operation.attempts = Number(operation.attempts || 0) + 1;
             operation.status = "retry";
             operation.lastError = info.message;
             operation.requiresAction = info.requiresAction;
             operation.nextAttemptAt = info.requiresAction
               ? Number.MAX_SAFE_INTEGER
-              : Date.now() + CORE.retryDelay(operation.attempts);
+              : Date.now() +
+                (info.busy ? 15000 : CORE.retryDelay(operation.attempts));
             await putOperation(operation);
             if (/AUTH_REQUIRED/.test(info.message)) {
               authFail(error);
@@ -552,7 +573,7 @@
           navigator.onLine &&
           document.visibilityState === "visible"
         ) {
-          setTimeout(() => syncAppData(!!manual, false, true), 250);
+          setTimeout(() => syncAppData(false, false, true), 250);
         }
       }
     }
@@ -647,6 +668,13 @@
           toast("There is no connection right now. Your work is safe.");
         return;
       }
+      if (
+        !manual &&
+        !blocking &&
+        Date.now() - lastBackgroundPullAt < BACKGROUND_PULL_MIN_INTERVAL_MS
+      )
+        return;
+      if (!manual) lastBackgroundPullAt = Date.now();
       let pending = await unsyncedOperations();
       if (pending.some((row) => !row.requiresAction)) {
         if (queueRunning) return;
@@ -691,9 +719,18 @@
       }
     };
 
-    manualSync = function () {
-      processSyncQueue(true);
-      syncAppData(true, false, true);
+    manualSync = async function () {
+      if (SYNCING) return;
+      if (!navigator.onLine)
+        return toast("There is no connection right now. Your work is safe.");
+      setSyncState(true);
+      try {
+        await processSyncQueue(true);
+        await syncAppData(false, false, true);
+        toast("Update complete.");
+      } finally {
+        setSyncState(false);
+      }
     };
 
     loadApp = function () {
@@ -1456,6 +1493,9 @@
         inspection.EditedAt ||
         inspection.CompletedAt ||
         "";
+      form.dataset.expectedVersion = String(
+        inspection._remoteVersion || inspection.Version || 0,
+      );
       form.querySelector("[data-edit-title]").textContent =
         "Edit " + inspection.VanNumber;
       form.elements.status.value = inspection.Status || "Operational";
@@ -1541,6 +1581,9 @@
               merged.inspection.EditedAt ||
               merged.inspection.CompletedAt ||
               "";
+            form.dataset.expectedVersion = String(
+              merged.inspection.Version || 0,
+            );
             renderInspectionEditMedia();
             renderInspectionEditAudit(merged);
             cacheInspectionEditRecord(merged);
@@ -1769,6 +1812,7 @@
       const payload = {
         inspectionId: inspection.InspectionID,
         expectedUpdatedAt: form.dataset.expectedUpdatedAt,
+        expectedVersion: Number(form.dataset.expectedVersion || 0),
         status: form.elements.status.value,
         notes: form.elements.notes.value,
         newDamageFound: inspectionEditHasDamage(editRecord)
@@ -1793,6 +1837,7 @@
         UpdatedAt: now,
         EditedAt: now,
         _remoteUpdatedAt: payload.expectedUpdatedAt,
+        _remoteVersion: payload.expectedVersion,
         pending: true,
       });
       DATA.completedToday = [

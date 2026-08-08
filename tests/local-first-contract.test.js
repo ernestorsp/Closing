@@ -82,10 +82,16 @@ test("background synchronization stays invisible to the customer", () => {
   assert.doesNotMatch(frontend, /These changes need review/);
   assert.doesNotMatch(frontend, /Remote synchronization is pending/);
   assert.match(frontend, /recoverOwnClosingConflict/);
+  assert.match(frontend, /operation\.type === "EDIT_INSPECTION"/);
+  assert.match(frontend, /CORE\.operationTimeout\(operation\.type\)/);
+  assert.match(frontend, /info\.busy \? 15000/);
+  assert.match(frontend, /expectedVersion/);
   assert.match(
     backend,
     /norm_\(existing\.SavedByEmail\) === norm_\(session\.email\)/,
   );
+  assert.match(backend, /const neverEdited = !norm_\(inspection\.EditedByEmail\)/);
+  assert.match(backend, /expectedVersion > 0 \? !versionIsCurrent/);
   assert.match(frontend, /if \(manual\) setSyncState\(true\)/);
   assert.match(frontend, /if \(manual\) setSyncState\(false\)/);
 });
