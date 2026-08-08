@@ -19,6 +19,14 @@
       return Math.round(base * jitter);
     }
 
+    function operationTimeout(type) {
+      return ["SAVE_INSPECTION_PHOTO", "SAVE_DAMAGE", "SEND_NOTES"].includes(
+        String(type || ""),
+      )
+        ? 120000
+        : 75000;
+    }
+
     function errorInfo(error) {
       const message = String(
         (error && error.message) || error || "Synchronization failed.",
@@ -26,14 +34,16 @@
       const conflict = /\bCONFLICT\b|changed by another|newer version/i.test(
         message,
       );
+      const busy = /\bSYNC_BUSY\b|already syncing/i.test(message);
       const action =
         conflict ||
-        /AUTH_REQUIRED|permission|required|invalid|not found|quota|\bselect\b|\bmust\b|no longer available|no longer editable|belongs to another/i.test(
+        /AUTH_REQUIRED|permission|required|invalid|not found|not enough email quota|daily email quota|\bselect\b|\bmust\b|no longer available|no longer editable|belongs to another/i.test(
           message,
         );
       return {
         message: message.replace(/^Error:\s*/, ""),
         conflict,
+        busy,
         requiresAction: action,
       };
     }
@@ -111,6 +121,7 @@
     root.ClosingSyncCore = {
       operationId,
       retryDelay,
+      operationTimeout,
       errorInfo,
       pendingChecklist,
       stableFingerprint,
