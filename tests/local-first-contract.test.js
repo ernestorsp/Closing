@@ -80,6 +80,12 @@ test("background synchronization stays invisible to the customer", () => {
   assert.doesNotMatch(frontend, /Pending sync/);
   assert.doesNotMatch(frontend, /changes that require review/);
   assert.doesNotMatch(frontend, /These changes need review/);
+  assert.doesNotMatch(frontend, /Remote synchronization is pending/);
+  assert.match(frontend, /recoverOwnClosingConflict/);
+  assert.match(
+    backend,
+    /norm_\(existing\.SavedByEmail\) === norm_\(session\.email\)/,
+  );
   assert.match(frontend, /if \(manual\) setSyncState\(true\)/);
   assert.match(frontend, /if \(manual\) setSyncState\(false\)/);
 });
