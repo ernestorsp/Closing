@@ -58,6 +58,8 @@ Do not commit the spreadsheet ID, passwords, session tokens, or deployment secre
 
 Critical changes are accepted by the interface after they are persisted in IndexedDB. The outbox resumes automatically when connectivity returns, when the app returns to the foreground, and every 30 seconds while it is visible. Google Sheets operations use stable operation IDs; successful operations are recorded in `SYNC_OPERATIONS` so a retry does not duplicate them. Synced photo payloads are removed from the local outbox only after server confirmation.
 
+Automatic synchronization is intentionally silent in the customer interface. It does not display synced, syncing, pending, or review-required indicators. The optional **Sync now** button only shows feedback when the user explicitly presses it.
+
 The web platform cannot continue Apps Script calls after the browser has fully terminated. Pending work survives that closure and resumes the next time the app opens.
 
 Run the local contract tests with `npm test` before deploying.
