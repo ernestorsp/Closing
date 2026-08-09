@@ -491,16 +491,28 @@
     async function nextOperation() {
       const rows = await unsyncedOperations();
       const now = Date.now();
-      rows.forEach((row) => {
+      for (const row of rows) {
         if (
           row.status === "syncing" &&
           now - Number(row.updatedAt || 0) > 120000
         ) {
           row.status = "retry";
           row.nextAttemptAt = now;
-          putOperation(row);
+          await putOperation(row);
         }
-      });
+        // Email is an external side effect. Never resend it later in the
+        // background after an ambiguous timeout; the next server refresh will
+        // confirm whether the first delivery completed.
+        if (
+          row.type === "SEND_NOTES" &&
+          row.status === "retry" &&
+          !row.requiresAction
+        ) {
+          row.requiresAction = true;
+          row.nextAttemptAt = Number.MAX_SAFE_INTEGER;
+          await putOperation(row);
+        }
+      }
       return rows.find((row, index) => {
         if (row.requiresAction || Number(row.nextAttemptAt || 0) > now)
           return false;
@@ -541,12 +553,21 @@
               operation.attempts = Number(operation.attempts || 0) + 1;
             operation.status = "retry";
             operation.lastError = info.message;
-            operation.requiresAction = info.requiresAction;
-            operation.nextAttemptAt = info.requiresAction
+            operation.requiresAction =
+              operation.type === "SEND_NOTES" || info.requiresAction;
+            operation.nextAttemptAt = operation.requiresAction
               ? Number.MAX_SAFE_INTEGER
               : Date.now() +
                 (info.busy ? 15000 : CORE.retryDelay(operation.attempts));
             await putOperation(operation);
+            if (operation.type === "SEND_NOTES") {
+              NOTES_SENDING = false;
+              renderNotes();
+              toast(
+                "The email was not confirmed. Review the notes and press Send again.",
+                true,
+              );
+            }
             if (/AUTH_REQUIRED/.test(info.message)) {
               authFail(error);
               break;
@@ -647,7 +668,11 @@
           data.checklist.inspectionsReady = current.checklist.inspectionsReady;
         }
       }
-      if (relevant("SEND_NOTES") && current.closingNote) {
+      if (
+        relevant("SEND_NOTES") &&
+        current.closingNote &&
+        !(data.closingNote && !data.closingNote.optimistic)
+      ) {
         data.closingNote = current.closingNote;
         if (data.checklist && current.checklist)
           data.checklist.notesSent = current.checklist.notesSent;
@@ -660,6 +685,31 @@
           !!data.checklist.returnedPackagesReady &&
           !!data.checklist.routesTomorrowReady;
       return data;
+    }
+
+    async function settleConfirmedClosingEmail(data, operations) {
+      if (!(data && data.closingNote && !data.closingNote.optimistic))
+        return operations;
+      const station = String((data.user && data.user.station) || "");
+      const day = String(data.today || "");
+      const matching = operations.filter(
+        (row) =>
+          row.type === "SEND_NOTES" &&
+          String(row.station || "") === station &&
+          String(row.day || "") === day,
+      );
+      await Promise.all(
+        matching.map((row) =>
+          updateOperation(row.id, {
+            status: "synced",
+            requiresAction: false,
+            payload: {},
+            lastError: "Confirmed sent by server.",
+            syncedAt: Date.now(),
+          }),
+        ),
+      );
+      return operations.filter((row) => !matching.includes(row));
     }
 
     syncAppData = async function (manual, blocking, force) {
@@ -684,10 +734,9 @@
       pullRunning = true;
       if (manual) setSyncState(true);
       try {
-        const data = mergePendingSnapshot(
-          await serverGetAppData(!!manual || !!force),
-          pending,
-        );
+        const remote = await serverGetAppData(!!manual || !!force);
+        pending = await settleConfirmedClosingEmail(remote, pending);
+        const data = mergePendingSnapshot(remote, pending);
         saveAppCache(data);
         applyAppData(data);
         if (manual) toast("Everything is synchronized.");
@@ -762,6 +811,7 @@
         NOTES_SENDING = operations.some(
           (operation) =>
             operation.type === "SEND_NOTES" &&
+            !operation.requiresAction &&
             String(operation.day || "") === String(DATA.today || "") &&
             String(operation.station || "") ===
               String((DATA.user && DATA.user.station) || ""),
@@ -1205,7 +1255,11 @@
       const pending = CORE.pendingChecklist(DATA.checklist, NOTE_PHOTO_LOADING);
       text.disabled = sent || NOTES_SENDING;
       button.disabled = sent || NOTES_SENDING;
-      button.textContent = NOTES_SENDING ? "SAVED" : "SEND CLOSING NOTES";
+      button.textContent = sent
+        ? "CLOSING NOTES SENT"
+        : NOTES_SENDING
+          ? "SENDING…"
+          : "SEND CLOSING NOTES";
       meta.textContent = sent
         ? "Ready · Closing notes and email were sent for today."
         : NOTES_SENDING
