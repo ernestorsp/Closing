@@ -355,6 +355,7 @@ async function uploadDrivers(e){e.preventDefault();const button=e.submitter,file
 async function uploadVans(e){e.preventDefault();const button=e.submitter,file=e.target.elements.file.files[0];button.disabled=true;button.textContent='VALIDATING…';try{const payload=await readUpload(file);google.script.run.withSuccessHandler(r=>{button.disabled=false;button.textContent='UPDATE VANS';e.target.elements.file.value='';toast(r.message);ADMIN_LOADING=false;loadAdminData();refreshAppData()}).withFailureHandler(err=>{button.disabled=false;button.textContent='UPDATE VANS';toast(err.message||String(err),true)}).importVansFile(TOKEN,payload)}catch(err){button.disabled=false;button.textContent='UPDATE VANS';toast(err.message,true)}}
 function form(f){return Object.fromEntries(new FormData(f).entries())}function fmt(v){if(!v)return'';const d=new Date(v);return isNaN(d)?String(v):d.toLocaleString()}function fmtFull(v){const d=new Date(v);return isNaN(d)?String(v):d.toLocaleString(undefined,{weekday:'long',year:'numeric',month:'long',day:'numeric',hour:'numeric',minute:'2-digit'})}function statusClass(s){return s==='Operational'?'good':s==='Grounded'?'bad':'warn'}function empty(t){return '<div class="panel meta">'+esc(t)+'</div>'}function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 
+
 /* VAN_INFO_NOTE_UI_V2_START */
 function renderVanInfoReasonBadges(){
   try{
@@ -362,49 +363,88 @@ function renderVanInfoReasonBadges(){
 
     document.querySelectorAll('.vanInfoReasonInline').forEach(el => el.remove());
 
-    const vans = DATA.vans.filter(van => String(van.CurrentNote || '').trim());
+    const vans = DATA.vans.filter(van =>
+      String(van.CurrentNote || '').trim()
+    );
 
     vans.forEach(van => {
       const number = String(van.VanNumber || van.VanID || '').trim();
       const note = String(van.CurrentNote || '').trim();
+
       if(!number || !note) return;
 
-      const nodes = [
-        ...document.querySelectorAll('#pending article,#pending .card,#pending [class*="van"]')
+      const cards = [
+        ...document.querySelectorAll(
+          '#pending article,#pending .card,#pending [class*="van"]'
+        )
       ];
 
-      const card = nodes.find(el => {
-        const content = String(el.textContent || '');
-        return content.includes(number) && /Inspect|Inspeccionar|Continue|Continuar/i.test(content);
+      const card = cards.find(el => {
+        const txt = String(el.textContent || '');
+        return txt.includes(number) &&
+          /Inspect|Inspeccionar|Continue|Continuar/i.test(txt);
       });
 
-      if(card){
-        const box = document.createElement('div');
-        box.className = 'vanInfoReasonInline';
-        box.style.cssText =
-          'margin-top:6px;' +
-          'font-size:11px;' +
-          'line-height:15px;' +
-          'font-weight:700;' +
-          'color:#755300;' +
-          'background:#fff6cf;' +
-          'border:1px solid #efd98a;' +
-          'border-radius:7px;' +
-          'padding:5px 8px;' +
-          'width:fit-content;' +
-          'max-width:380px;';
+      if(!card) return;
 
-        box.textContent = (APP_LANGUAGE === 'es' ? 'Nota: ' : 'Note: ') + note;
+      const candidates = [
+        ...card.querySelectorAll('span,div,strong,p')
+      ];
 
-        const action = [...card.querySelectorAll('button')]
-          .find(btn => /Inspect|Inspeccionar|Continue|Continuar/i.test(btn.textContent || ''));
+      const statusEl = candidates.find(el => {
+        const txt = String(el.textContent || '').trim();
+        return /^(Operational|Downed|Grounded|Operacional)$/i.test(txt);
+      });
 
-        if(action){
-          let info = [...card.children].find(child => !child.contains(action));
-          (info || card).appendChild(box);
+      const badge = document.createElement('span');
+      badge.className = 'vanInfoReasonInline';
+      badge.title = note;
+
+      const shortNote = note.length > 34
+        ? note.slice(0,31) + '...'
+        : note;
+
+      badge.textContent =
+        (APP_LANGUAGE === 'es' ? 'Nota: ' : 'Note: ') + shortNote;
+
+      badge.style.cssText =
+        'display:inline-flex;' +
+        'align-items:center;' +
+        'margin-left:8px;' +
+        'padding:4px 8px;' +
+        'border-radius:999px;' +
+        'font-size:10px;' +
+        'line-height:14px;' +
+        'font-weight:700;' +
+        'color:#755300;' +
+        'background:#fff6cf;' +
+        'border:1px solid #efd98a;' +
+        'max-width:260px;' +
+        'white-space:nowrap;' +
+        'overflow:hidden;' +
+        'text-overflow:ellipsis;' +
+        'vertical-align:middle;';
+
+      if(statusEl){
+        const parent = statusEl.parentElement;
+
+        if(parent){
+          parent.style.display = 'flex';
+          parent.style.alignItems = 'center';
+          parent.style.flexWrap = 'wrap';
+
+          statusEl.insertAdjacentElement('afterend', badge);
         }else{
-          card.appendChild(box);
+          statusEl.insertAdjacentElement('afterend', badge);
         }
+      }else{
+        const infoBlock = [...card.children].find(child => {
+          const txt = String(child.textContent || '');
+          return txt.includes(number) &&
+            !/Inspect|Inspeccionar|Continue|Continuar/i.test(txt);
+        });
+
+        (infoBlock || card).appendChild(badge);
       }
     });
 
@@ -417,7 +457,10 @@ function renderVanInfoReasonBadges(){
     }
 
     const currentVanId = String(CURRENT.inspection.VanID || '');
-    const van = DATA.vans.find(v => String(v.VanID || '') === currentVanId);
+    const van = DATA.vans.find(v =>
+      String(v.VanID || '') === currentVanId
+    );
+
     const note = String(van && van.CurrentNote || '').trim();
 
     if(!note){
@@ -444,7 +487,9 @@ function renderVanInfoReasonBadges(){
       inspectionVan.parentElement.appendChild(inspectionBadge);
     }
 
-    inspectionBadge.textContent = (APP_LANGUAGE === 'es' ? 'Nota: ' : 'Note: ') + note;
+    inspectionBadge.textContent =
+      (APP_LANGUAGE === 'es' ? 'Nota: ' : 'Note: ') + note;
+
   }catch(error){
     console.warn('[VAN_INFO note UI]', error);
   }
@@ -455,16 +500,22 @@ if(!window.__VAN_INFO_NOTE_UI_V2){
 
   const observer = new MutationObserver(() => {
     clearTimeout(window.__vanInfoNoteUiTimer);
-    window.__vanInfoNoteUiTimer = setTimeout(renderVanInfoReasonBadges, 80);
+    window.__vanInfoNoteUiTimer =
+      setTimeout(renderVanInfoReasonBadges, 80);
   });
 
   window.addEventListener('load', () => {
-    observer.observe(document.body, { childList:true, subtree:true });
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true
+    });
+
     renderVanInfoReasonBadges();
   });
 
   setInterval(renderVanInfoReasonBadges, 2000);
 }
 /* VAN_INFO_NOTE_UI_V2_END */
+
 
 </script>
