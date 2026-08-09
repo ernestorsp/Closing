@@ -65,6 +65,29 @@ app.post('/v1/sync/apply', requireAuth, async (req, res, next) => {
   } catch (error) { next(error); }
 });
 
+app.get('/v1/van-note/:vanId', requireAuth, async (req, res, next) => {
+  try {
+    const vanId = text(req.params.vanId, 160).trim();
+    if (!vanId) throw apiError(400, 'INVALID_VAN', 'Van ID is required.');
+    const snapshot = await db.collection('vans').doc(vanId).get();
+    if (!snapshot.exists) throw apiError(404, 'VAN_NOT_FOUND', 'Van not found.');
+    res.json({ ok: true, vanId, note: text(snapshot.get('CurrentNote') || snapshot.get('VanInfoReason') || '', 5000) });
+  } catch (error) { next(error); }
+});
+
+app.patch('/v1/van-note/:vanId', requireAuth, async (req, res, next) => {
+  try {
+    const vanId = text(req.params.vanId, 160).trim();
+    if (!vanId) throw apiError(400, 'INVALID_VAN', 'Van ID is required.');
+    const note = text(req.body?.note || '', 5000).trim();
+    const ref = db.collection('vans').doc(vanId);
+    const snapshot = await ref.get();
+    if (!snapshot.exists) throw apiError(404, 'VAN_NOT_FOUND', 'Van not found.');
+    await ref.set({ CurrentNote: note, VanInfoReason: note, NoteUpdatedAt: FieldValue.serverTimestamp(), NoteUpdatedByUid: req.user.uid, NoteUpdatedByEmail: req.user.email || '' }, { merge: true });
+    res.json({ ok: true, vanId, note });
+  } catch (error) { next(error); }
+});
+
 app.use('/v1/rpc', createRpcRouter({ db, auth, bucket, mailer, requireAuth, syncService }));
 
 app.get('/v1/public/inspection-skip', async (req, res, next) => {
