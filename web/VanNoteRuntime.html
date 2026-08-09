@@ -1,0 +1,61 @@
+<script>
+(function(){
+  'use strict';
+  let lastVanId='',saveTimer=null,lastSaved='';
+  function escapeHtml(value){return String(value||'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]))}
+  function currentVanId(){
+    try{return CURRENT&&CURRENT.inspection?String(CURRENT.inspection.VanID||'').trim():''}catch(_error){return''}
+  }
+  function ensureBox(){
+    let box=document.getElementById('vanInfoReasonNotice');
+    if(box)return box;
+    const head=document.querySelector('#inspection .inspectionHead');
+    if(!head)return null;
+    box=document.createElement('div');
+    box.id='vanInfoReasonNotice';
+    box.hidden=true;
+    box.style.cssText='margin:8px 0 14px;padding:9px 11px;border-radius:10px;background:#fff7d6;border:1px solid #ead58a;font-size:12px;line-height:1.35;color:#604d14;font-weight:600;';
+    head.insertAdjacentElement('afterend',box);
+    return box;
+  }
+  async function loadVanNote(force){
+    const vanId=currentVanId(),box=ensureBox();
+    if(!vanId||!box){if(box)box.hidden=true;return}
+    if(!force&&vanId===lastVanId)return;
+    lastVanId=vanId;
+    try{
+      const result=await window.AAXI_FIREBASE.request('/v1/van-note/'+encodeURIComponent(vanId),{method:'GET',timeout:15000});
+      if(currentVanId()!==vanId)return;
+      const note=String(result&&result.note||'').trim();
+      lastSaved=note;
+      box.innerHTML=note?'<span style="font-weight:800">Van note:</span> '+escapeHtml(note):'';
+      box.hidden=!note;
+    }catch(error){
+      console.warn('[Van note] could not load',error);
+      box.hidden=true;
+    }
+  }
+  async function saveVanNote(){
+    const vanId=currentVanId(),input=document.getElementById('inspectionNotes');
+    if(!vanId||!input)return;
+    const note=String(input.value||'').trim();
+    if(note===lastSaved)return;
+    try{
+      await window.AAXI_FIREBASE.request('/v1/van-note/'+encodeURIComponent(vanId),{method:'PATCH',body:{note},timeout:15000});
+      lastSaved=note;
+      const box=ensureBox();
+      if(box){box.innerHTML=note?'<span style="font-weight:800">Van note:</span> '+escapeHtml(note):'';box.hidden=!note}
+    }catch(error){console.warn('[Van note] could not save',error)}
+  }
+  function scheduleSave(){clearTimeout(saveTimer);saveTimer=setTimeout(saveVanNote,800)}
+  function bind(){
+    ensureBox();
+    const input=document.getElementById('inspectionNotes');
+    if(input&&!input.dataset.vanNoteBound){input.dataset.vanNoteBound='1';input.addEventListener('input',scheduleSave);input.addEventListener('change',scheduleSave)}
+    loadVanNote(false);
+  }
+  const observer=new MutationObserver(()=>bind());
+  document.addEventListener('DOMContentLoaded',()=>{bind();observer.observe(document.body,{subtree:true,childList:true,characterData:true,attributes:true,attributeFilter:['class']})});
+  window.addEventListener('focus',()=>loadVanNote(true));
+})();
+</script>
