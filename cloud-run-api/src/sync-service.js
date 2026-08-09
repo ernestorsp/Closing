@@ -283,7 +283,35 @@ async function saveDamage({ db, req, operation, payload, actor }) {
       ResolutionStatus: 'Open',
       OperationID: operation.id
     }, { merge: true });
-    tx.set(inspectionRef, { NewDamageFound: 'Yes', LastOperationID: operation.id, UpdatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    const damageNote = text(
+      payload.description ||
+      payload.notes ||
+      payload.comment ||
+      payload.comments ||
+      part,
+      5000
+    );
+
+    tx.set(
+      db.collection('vans').doc(String(inspection.VanID)),
+      {
+        CurrentNote: damageNote,
+        CurrentNoteSource: 'DAMAGE',
+        VanInfoDamageNotePending: true,
+        UpdatedAt: FieldValue.serverTimestamp()
+      },
+      { merge: true }
+    );
+
+    tx.set(
+      inspectionRef,
+      {
+        NewDamageFound: 'Yes',
+        LastOperationID: operation.id,
+        UpdatedAt: FieldValue.serverTimestamp()
+      },
+      { merge: true }
+    );
   });
   await auditWrite(db, actor, 'REPORT_DAMAGE', 'INSPECTION', inspectionId, part);
   return inspectionData(db, inspectionId, req);
