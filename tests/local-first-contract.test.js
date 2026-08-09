@@ -23,6 +23,10 @@ const legacyBackend = fs.readFileSync(
   path.join(__dirname, "..", "apps-script", "Code.gs"),
   "utf8",
 );
+const closingNotesService = fs.readFileSync(
+  path.join(__dirname, "..", "cloud-run-api", "src", "closing-notes.js"),
+  "utf8",
+);
 
 test("every queued operation type is accepted by the idempotent backend", () => {
   const queued = [
@@ -96,6 +100,27 @@ test("background synchronization stays invisible to the customer", () => {
   assert.match(frontend, /if \(manual\) setSyncState\(false\)/);
 });
 
+test("background refresh preserves an in-progress Rescue edit", () => {
+  assert.match(scripts, /RESCUE_EDITING=false/);
+  assert.match(scripts, /editing:RESCUE_EDITING/);
+  assert.match(scripts, /if\(!RESCUE_SAVING\)RESCUE_EDITING=true/);
+  assert.match(scripts, /const rescueState=RESCUE_EDITING\?/);
+  assert.match(scripts, /DATA\.dailyRescueDrivers=rescueState\.dailyDrivers/);
+  assert.match(scripts, /RESCUE_EDITING\|\|!!\(draft&&draft\.editing\)/);
+  assert.match(scripts, /if\(DATA\.rescueFinalized&&!editing\)/);
+  assert.match(scripts, /RESCUE_EDITING=true;DATA\.rescueFinalized=false/);
+  assert.match(scripts, /RESCUE_EDITING=false;localStorage\.removeItem\(rescueDraftKey\(\)\)/);
+});
+
+test("background refresh preserves an in-progress Closing edit", () => {
+  assert.match(scripts, /CLOSING_EDITING=false/);
+  assert.match(scripts, /closingState=CLOSING_EDITING&&CLOSING_DRAFT/);
+  assert.match(scripts, /if\(closingState\)\{CLOSING_DRAFT=closingState;persistClosingDraft\(\)\}/);
+  assert.match(scripts, /if\(!CLOSING_SAVING\)CLOSING_EDITING=true/);
+  assert.match(scripts, /CLOSING_DRAFT\._editing=CLOSING_EDITING/);
+  assert.match(scripts, /CLOSING_EDITING=false;DATA\.closingData=r\.record/);
+});
+
 test("DJX4 omits receipt drivers and empty DVIC is N/A in email", () => {
   assert.match(index, /id="driversWithReceiptsWrap"/);
   assert.match(scripts, /receiptsWrap\.hidden=isDjx4/);
@@ -113,4 +138,13 @@ test("DJX4 omits receipt drivers and empty DVIC is N/A in email", () => {
     legacyBackend,
     /dvicValue=String\(data\.DVICDrivers\|\|\'\'\)\.trim\(\)\|\|\'N\/A\'/,
   );
+});
+
+test("Closing Notes email cannot be replayed by background synchronization", () => {
+  assert.match(frontend, /operation\.type === "SEND_NOTES" \|\| info\.requiresAction/);
+  assert.match(frontend, /Confirmed sent by server\./);
+  assert.match(frontend, /CLOSING NOTES SENT/);
+  assert.match(closingNotesService, /idempotencyKey: `closing-notes-\$\{key\}`/);
+  assert.match(closingNotesService, /EmailLeaseUntil/);
+  assert.match(closingNotesService, /EMAIL_ALREADY_SENDING/);
 });
