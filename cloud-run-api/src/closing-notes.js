@@ -173,6 +173,47 @@ function emailHtml({ station, date, record, rescues, notes, warnings, senderName
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
+
+  <style>
+    @media only screen and (max-width:620px) {
+      .emailMetric {
+        display:block !important;
+        width:100% !important;
+        box-sizing:border-box !important;
+        padding:5px 12px !important;
+      }
+
+      .emailMetric > div {
+        width:100% !important;
+        box-sizing:border-box !important;
+      }
+
+      .emailTopCell {
+        display:block !important;
+        width:100% !important;
+        box-sizing:border-box !important;
+        text-align:left !important;
+        padding:11px 16px !important;
+      }
+
+      .emailTitleCell,
+      .emailLogoCell {
+        display:block !important;
+        width:100% !important;
+        box-sizing:border-box !important;
+        text-align:left !important;
+      }
+
+      .emailLogoCell {
+        padding-top:14px !important;
+      }
+
+      .emailMainPadding {
+        padding-left:14px !important;
+        padding-right:14px !important;
+      }
+    }
+  </style>
 </head>
 
 <body style="
@@ -200,7 +241,7 @@ function emailHtml({ station, date, record, rescues, notes, warnings, senderName
 
   <!-- TOP NAVY BAR -->
   <tr>
-    <td style="
+    <td class="emailTopCell" style="
       padding:15px 28px;
       background:#062f5d;
       color:#ffffff;
@@ -211,7 +252,7 @@ function emailHtml({ station, date, record, rescues, notes, warnings, senderName
       AAXI OPERATIONS
     </td>
 
-    <td align="right" style="
+    <td class="emailTopCell" align="right" style="
       padding:15px 28px;
       background:#062f5d;
       color:#ffffff;
@@ -223,11 +264,11 @@ function emailHtml({ station, date, record, rescues, notes, warnings, senderName
 
   <!-- TITLE -->
   <tr>
-    <td colspan="2" style="padding:24px 30px 8px 30px;">
+    <td colspan="2" class="emailMainPadding" style="padding:24px 30px 8px 30px;">
       <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
         <tr>
 
-          <td style="vertical-align:middle;">
+          <td class="emailTitleCell" style="vertical-align:middle;">
             <div style="
               color:#062f5d;
               font-size:30px;
@@ -251,7 +292,7 @@ function emailHtml({ station, date, record, rescues, notes, warnings, senderName
             </div>
           </td>
 
-          <td align="right" style="vertical-align:middle;">
+          <td class="emailLogoCell" align="right" style="vertical-align:middle;">
             <div style="
               color:#1683c4;
               font-size:38px;
@@ -270,7 +311,7 @@ function emailHtml({ station, date, record, rescues, notes, warnings, senderName
               letter-spacing:6px;
               padding-left:6px;
             ">
-              EXPRESS
+              XPRESS
             </div>
           </td>
 
@@ -286,14 +327,14 @@ function emailHtml({ station, date, record, rescues, notes, warnings, senderName
 
   <!-- GREETING -->
   <tr>
-    <td colspan="2" style="
+    <td colspan="2" class="emailMainPadding" style="
       padding:8px 30px 18px 30px;
       color:#263e4c;
       font-size:13px;
       line-height:20px;
     ">
       Good afternoon,
-      <span style="color:#c83232;">A&amp;A Express Management Team,</span>
+      <span style="color:#c83232;">A&amp;A Xpress Management Team,</span>
       <br>
       Below is the completed closing summary for
       <strong>${html(station)}</strong>.
@@ -333,7 +374,7 @@ function emailHtml({ station, date, record, rescues, notes, warnings, senderName
 
         <tr>
 
-          <td width="25%" style="padding:8px 7px 15px 15px;">
+          <td width="25%" class="emailMetric" style="padding:8px 7px 15px 15px;">
             <div style="
               border:1px solid #c9ead6;
               background:#fbfffc;
@@ -359,7 +400,7 @@ function emailHtml({ station, date, record, rescues, notes, warnings, senderName
             </div>
           </td>
 
-          <td width="25%" style="padding:8px 7px 15px 7px;">
+          <td width="25%" class="emailMetric" style="padding:8px 7px 15px 7px;">
             <div style="
               border:1px solid #f3d5a8;
               background:#fffdfa;
@@ -385,7 +426,7 @@ function emailHtml({ station, date, record, rescues, notes, warnings, senderName
             </div>
           </td>
 
-          <td width="25%" style="padding:8px 7px 15px 7px;">
+          <td width="25%" class="emailMetric" style="padding:8px 7px 15px 7px;">
             <div style="
               border:1px solid #f1c6c6;
               background:#fffafa;
@@ -411,7 +452,7 @@ function emailHtml({ station, date, record, rescues, notes, warnings, senderName
             </div>
           </td>
 
-          <td width="25%" style="padding:8px 15px 15px 7px;">
+          <td width="25%" class="emailMetric" style="padding:8px 15px 15px 7px;">
             <div style="
               border:1px solid #c7dfef;
               background:#fbfdff;
@@ -478,7 +519,7 @@ function emailHtml({ station, date, record, rescues, notes, warnings, senderName
         <tr>
 
           <!-- LEFT DETAILS -->
-          <td width="43%" valign="top" style="padding:8px 8px 15px 15px;">
+          <td width="100%" valign="top" style="display:block;width:100%;box-sizing:border-box;padding:8px 15px 6px 15px;">
 
             <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0"
                    style="
@@ -498,7 +539,7 @@ function emailHtml({ station, date, record, rescues, notes, warnings, senderName
           </td>
 
           <!-- RIGHT DETAILS -->
-          <td width="57%" valign="top" style="padding:8px 15px 15px 8px;">
+          <td width="100%" valign="top" style="display:block;width:100%;box-sizing:border-box;padding:6px 15px 15px 15px;">
 
             <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0"
                    style="
@@ -571,12 +612,11 @@ function emailHtml({ station, date, record, rescues, notes, warnings, senderName
         <tr>
 
           <!-- OPERATIONAL -->
-          <td width="61%" valign="top" style="padding-right:8px;">
+          <td width="100%" valign="top" style="display:block;width:100%;box-sizing:border-box;padding:0 0 12px 0;">
             <div style="
               border:1px solid #d8e3e9;
               border-radius:10px;
               padding:15px;
-              min-height:230px;
             ">
               <div style="
                 color:#062f5d;
@@ -600,7 +640,7 @@ function emailHtml({ station, date, record, rescues, notes, warnings, senderName
           </td>
 
           <!-- DOWNED + GROUNDED -->
-          <td width="39%" valign="top" style="padding-left:8px;">
+          <td width="100%" valign="top" style="display:block;width:100%;box-sizing:border-box;padding:0;">
 
             <div style="
               border:1px solid #d8e3e9;
@@ -669,12 +709,11 @@ function emailHtml({ station, date, record, rescues, notes, warnings, senderName
         <tr>
 
           <!-- SHOP -->
-          <td width="35%" valign="top" style="padding-right:7px;">
+          <td width="100%" valign="top" style="display:block;width:100%;box-sizing:border-box;padding:0 0 12px 0;">
             <div style="
               border:1px solid #d8e3e9;
               border-radius:10px;
               padding:15px;
-              min-height:245px;
             ">
               <div style="
                 color:#062f5f;
@@ -698,12 +737,11 @@ function emailHtml({ station, date, record, rescues, notes, warnings, senderName
           </td>
 
           <!-- RESCUES -->
-          <td width="31%" valign="top" style="padding:0 7px;">
+          <td width="100%" valign="top" style="display:block;width:100%;box-sizing:border-box;padding:0 0 12px 0;">
             <div style="
               border:1px solid #d8e3e9;
               border-radius:10px;
               padding:15px;
-              min-height:245px;
             ">
               <div style="
                 color:#062f5f;
@@ -743,12 +781,11 @@ function emailHtml({ station, date, record, rescues, notes, warnings, senderName
           </td>
 
           <!-- NOTES -->
-          <td width="34%" valign="top" style="padding-left:7px;">
+          <td width="100%" valign="top" style="display:block;width:100%;box-sizing:border-box;padding:0;">
             <div style="
               border:1px solid #d8e3e9;
               border-radius:10px;
               padding:15px;
-              min-height:245px;
             ">
               <div style="
                 color:#062f5f;
