@@ -67,16 +67,13 @@ export function dateKey(value) {
 }
 
 export function todayKey(now = new Date()) {
+  const operationalNow = new Date(now.getTime() - (2 * 60 * 60 * 1000));
   return new Intl.DateTimeFormat('en-CA', {
     timeZone: 'America/New_York',
     year: 'numeric',
     month: '2-digit',
     day: '2-digit'
-  }).format(now);
-}
-
-export function inspectionDayKey(now = new Date()) {
-  return todayKey(new Date(now.getTime() - (2 * 60 * 60 * 1000)));
+  }).format(operationalNow);
 }
 
 export function isYes(value) {
