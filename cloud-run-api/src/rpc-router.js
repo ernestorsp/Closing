@@ -12,6 +12,7 @@ import {
   dateKey,
   docData,
   identifier,
+  inspectionDayKey,
   isAdmin,
   isYes,
   publicUser,
@@ -47,11 +48,12 @@ async function appData(db, req) {
   const profile = req.profile;
   const selectedStation = workingStation(profile);
   const today = todayKey();
+  const inspectionToday = inspectionDayKey();
   const key = keyForDay(selectedStation, today);
   const [vans, spots, inspections, drivers, rescueDay, closing, note, skip, messages, acks] = await Promise.all([
     getCollection(db, 'vans', 2500),
     getCollection(db, 'spots', 1000),
-    getWhere(db, 'inspections', 'InspectionDate', '==', today, 1500),
+    getWhere(db, 'inspections', 'InspectionDate', '==', inspectionToday, 1500),
     getCollection(db, 'rescueDrivers', 3000),
     db.collection('rescueDays').doc(key).get(),
     db.collection('closingDays').doc(key).get(),
@@ -258,7 +260,7 @@ export function createRpcRouter({ db, auth, bucket, mailer, requireAuth, syncSer
         if (van.get('CurrentStatus') !== 'Grounded' && van.get('CurrentStation') !== 'SHOP') throw apiError(400, 'NOT_GROUNDED', 'Only grounded vans can be completed without inspection.');
         const selected = workingStation(req.profile);
         tx.set(inspectionRef, {
-          InspectionID: inspectionId, InspectionDate: todayKey(), StartedAt: FieldValue.serverTimestamp(), CompletedAt: FieldValue.serverTimestamp(), DurationMinutes: 0,
+          InspectionID: inspectionId, InspectionDate: inspectionDayKey(), StartedAt: FieldValue.serverTimestamp(), CompletedAt: FieldValue.serverTimestamp(), DurationMinutes: 0,
           UserUid: req.user.uid, UserEmail: actor.email, UserName: actor.name, WorkingStation: selected, VanID: id, VanNumber: van.get('VanNumber') || id,
           PreviousStation: van.get('CurrentStation') || selected, Station: van.get('CurrentStation') || selected, PreviousSpot: van.get('CurrentSpot') || '', Spot: van.get('CurrentSpot') || '',
           PreviousStatus: 'Grounded', Status: 'Grounded', LocationChanged: false, PhotoProgress: '0/6', InspectionState: 'Completed', Notes: 'Grounded van - inspection not required.', Version: 1

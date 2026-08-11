@@ -75,6 +75,10 @@ export function todayKey(now = new Date()) {
   }).format(now);
 }
 
+export function inspectionDayKey(now = new Date()) {
+  return todayKey(new Date(now.getTime() - (2 * 60 * 60 * 1000)));
+}
+
 export function isYes(value) {
   return value === true || ['yes', 'true', '1', 'active'].includes(text(value, 20).toLowerCase());
 }

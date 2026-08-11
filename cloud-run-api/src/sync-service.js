@@ -11,6 +11,7 @@ import {
   dateKey,
   identifier,
   integer,
+  inspectionDayKey,
   isAdmin,
   sameMoment,
   serialize,
@@ -57,7 +58,7 @@ function canEditInspection(req, inspection) {
   } catch (_error) {
     return false;
   }
-  return String(inspection.InspectionDate || '').slice(0, 10) === todayKey();
+  return String(inspection.InspectionDate || '').slice(0, 10) === inspectionDayKey();
 }
 
 function assertInspectionOwner(req, inspection, { completedAllowed = false } = {}) {
@@ -110,7 +111,7 @@ export async function availableSpots(db, requestedStation, vanId = '', email = '
   if (selected === 'SHOP') return [];
   const [spots, todaysInspections] = await Promise.all([
     getWhere(db, 'spots', 'Station', '==', selected, 500),
-    getWhere(db, 'inspections', 'InspectionDate', '==', todayKey(), 1500)
+    getWhere(db, 'inspections', 'InspectionDate', '==', inspectionDayKey(), 1500)
   ]);
   const completedVanIds = new Set(todaysInspections.filter(row => row.InspectionState === 'Completed').map(row => String(row.VanID)));
   const now = Date.now();
@@ -337,7 +338,7 @@ async function finishInspection({ db, req, operation, payload, actor }) {
   const lockRef = db.collection('inspectionLocks').doc(vanId);
   const targetSpotRef = spotId ? db.collection('spots').doc(spotId) : null;
   const occupiedQuery = db.collection('spots').where('OccupiedByVanID', '==', vanId).limit(10);
-  const completedQuery = db.collection('inspections').where('InspectionDate', '==', todayKey()).limit(1500);
+  const completedQuery = db.collection('inspections').where('InspectionDate', '==', inspectionDayKey()).limit(1500);
   const damagesQuery = db.collection('damages').where('InspectionID', '==', inspectionId).limit(100);
   await db.runTransaction(async tx => {
     const [inspectionSnap, vanSnap, lockSnap, occupiedSnap, targetSpotSnap, completedSnap, damagesSnap] = await Promise.all([
@@ -587,7 +588,7 @@ async function editInspection({ db, req, operation, payload, actor }) {
   const spotRef = spotId ? db.collection('spots').doc(spotId) : null;
   const vanRef = db.collection('vans').doc(initial.VanID);
   const occupiedQuery = db.collection('spots').where('OccupiedByVanID', '==', initial.VanID).limit(10);
-  const completedQuery = db.collection('inspections').where('InspectionDate', '==', todayKey()).limit(1500);
+  const completedQuery = db.collection('inspections').where('InspectionDate', '==', inspectionDayKey()).limit(1500);
   const damagesQuery = db.collection('damages').where('InspectionID', '==', inspectionId).limit(100);
   let changes;
   await db.runTransaction(async tx => {
@@ -656,7 +657,16 @@ export function createSyncService({ db, sendClosingNotes }) {
       const operation = rawOperation || {};
       operation.id = identifier(operation.id, 'operation ID');
       operation.type = text(operation.type, 80).toUpperCase();
-      operation.day = dateKey(operation.day || todayKey());
+      const inspectionOperation = [
+        'START_INSPECTION',
+        'SAVE_INSPECTION_PHOTO',
+        'SAVE_DAMAGE',
+        'FINISH_INSPECTION',
+        'EDIT_INSPECTION'
+      ].includes(operation.type);
+      operation.day = dateKey(
+        inspectionOperation ? inspectionDayKey() : (operation.day || todayKey())
+      );
       operation.station = assertStationAccess(req.profile, operation.station || workingStation(req.profile));
       operation.payload = operation.payload || {};
       if (!OPERATION_TYPES.includes(operation.type)) throw apiError(400, 'UNSUPPORTED_OPERATION', 'Unsupported synchronization operation.');
