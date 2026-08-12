@@ -9,6 +9,7 @@ import { apiError, docData, serialize, text } from './domain.js';
 import { createMailer } from './mailer.js';
 import { createRpcRouter } from './rpc-router.js';
 import { createSyncService } from './sync-service.js';
+import { createVanInfoSync } from './van-info-sync.js';
 import { allSelectableSpots, createInspectionPatchService } from './closing-inspection-patches.js';
 
 if (!getApps().length) {
@@ -58,17 +59,44 @@ async function requireAuth(req, _res, next) {
 const sendClosingNotes = createClosingNotesSender({ db, bucket, mailer });
 const baseSyncService = createSyncService({ db, sendClosingNotes });
 const syncService = createInspectionPatchService({ db, baseSyncService });
+const vanInfoSync = createVanInfoSync({ db });
+let vanInfoSyncPromise = null;
+let lastVanInfoSyncAt = 0;
+
+async function runVanInfoSync({ force = false } = {}) {
+  if (!force && Date.now() - lastVanInfoSyncAt < 15000) return { ok: true, skipped: true, reason: 'RECENT_SYNC' };
+  if (vanInfoSyncPromise) return vanInfoSyncPromise;
+  vanInfoSyncPromise = vanInfoSync.run()
+    .then(result => {
+      lastVanInfoSyncAt = Date.now();
+      return result;
+    })
+    .catch(error => {
+      console.warn('[VAN_INFO sync]', error?.message || error);
+      return { ok: false, error: error?.message || String(error) };
+    })
+    .finally(() => { vanInfoSyncPromise = null; });
+  return vanInfoSyncPromise;
+}
+
+setInterval(() => { runVanInfoSync({ force: true }).catch(() => {}); }, 60000).unref();
 
 app.get('/healthz', (_req, res) => res.json({ ok: true, service: 'aaxi-closing-api', backend: 'firebase', time: new Date().toISOString() }));
 
 app.post('/v1/sync/apply', requireAuth, async (req, res, next) => {
   try {
-    res.json(await syncService.apply(req, req.body?.operation));
+    const result = await syncService.apply(req, req.body?.operation);
+    const type = text(req.body?.operation?.type || '', 80).toUpperCase();
+    if (['SAVE_DAMAGE', 'FINISH_INSPECTION', 'EDIT_INSPECTION'].includes(type)) {
+      runVanInfoSync({ force: true }).catch(() => {});
+    }
+    res.json(result);
   } catch (error) { next(error); }
 });
 
 app.get('/v1/van-note/:vanId', requireAuth, async (req, res, next) => {
   try {
+    await runVanInfoSync();
     const vanId = text(req.params.vanId, 160).trim();
     if (!vanId) throw apiError(400, 'INVALID_VAN', 'Van ID is required.');
     const snapshot = await db.collection('vans').doc(vanId).get();
@@ -109,6 +137,14 @@ app.patch('/v1/van-note/:vanId', requireAuth, async (req, res, next) => {
   } catch (error) { next(error); }
 });
 
+app.use('/v1/rpc', async (req, _res, next) => {
+  try {
+    const method = text(req.path.replace(/^\//, ''), 100);
+    if (['getAppData', 'startInspection', 'getInspection'].includes(method)) await runVanInfoSync();
+    next();
+  } catch (_error) { next(); }
+});
+
 // Occupied spots remain selectable. The actual conflict is resolved atomically by the patched FINISH_INSPECTION flow.
 app.post('/v1/rpc/getAvailableSpots', requireAuth, async (req, res, next) => {
   try {
@@ -116,6 +152,14 @@ app.post('/v1/rpc/getAvailableSpots', requireAuth, async (req, res, next) => {
     const spots = await allSelectableSpots(db, args[0]);
     res.json({ ok: true, result: serialize(spots) });
   } catch (error) { next(error); }
+});
+
+app.use('/v1/rpc', (req, res, next) => {
+  const method = text(req.path.replace(/^\//, ''), 100);
+  if (['finishInspection', 'saveDamageReport'].includes(method)) {
+    res.on('finish', () => { runVanInfoSync({ force: true }).catch(() => {}); });
+  }
+  next();
 });
 
 app.use('/v1/rpc', createRpcRouter({ db, auth, bucket, mailer, requireAuth, syncService }));
