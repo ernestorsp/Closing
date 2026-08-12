@@ -1,61 +1,139 @@
 <script>
 (function(){
   'use strict';
-  let lastVanId='',saveTimer=null,lastSaved='';
-  function escapeHtml(value){return String(value||'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]))}
+  let lastVanId='',loading=false;
+
   function currentVanId(){
     try{return CURRENT&&CURRENT.inspection?String(CURRENT.inspection.VanID||'').trim():''}catch(_error){return''}
   }
-  function ensureBox(){
-    let box=document.getElementById('vanInfoReasonNotice');
-    if(box)return box;
-    const head=document.querySelector('#inspection .inspectionHead');
-    if(!head)return null;
-    box=document.createElement('div');
-    box.id='vanInfoReasonNotice';
-    box.hidden=true;
-    box.style.cssText='margin:8px 0 14px;padding:9px 11px;border-radius:10px;background:#fff7d6;border:1px solid #ead58a;font-size:12px;line-height:1.35;color:#604d14;font-weight:600;';
-    head.insertAdjacentElement('afterend',box);
-    return box;
+  function currentVan(){
+    const id=currentVanId();
+    try{return (DATA.vans||[]).find(v=>String(v.VanID||'')===id)||null}catch(_error){return null}
   }
-  async function loadVanNote(force){
-    const vanId=currentVanId(),box=ensureBox();
-    if(!vanId||!box){if(box)box.hidden=true;return}
+  function validCurrentNote(van){
+    if(!van)return'';
+    const note=String(van.CurrentNote||'').trim(),source=String(van.CurrentNoteSource||'').toUpperCase();
+    if(!note)return'';
+    if(source==='VAN_INFO')return note;
+    if((source==='DAMAGE'||!source)&&van.CurrentDamageActive===true)return note;
+    return'';
+  }
+  function setDamageUi(state,note){
+    if(!CURRENT)return;
+    const active=!!(state&&state.active),notes=document.getElementById('inspectionNotes');
+    if(active){
+      DAMAGE_ANSWER='Yes';
+      document.querySelectorAll('[name=newDamage]').forEach(x=>x.checked=x.value==='Yes');
+      const form=document.getElementById('damageForm');if(form)form.hidden=false;
+      const part=document.getElementById('damagePart');
+      if(part&&state.category&&[...part.options].some(x=>String(x.value)===String(state.category)))part.value=state.category;
+      const severity=document.getElementById('damageSeverity');
+      if(severity&&state.severity&&[...severity.options].some(x=>String(x.value)===String(state.severity)))severity.value=state.severity;
+      if(notes&&note&&!notes.dataset.userEdited){notes.value=note;notes.dataset.currentStatePrefill=note}
+    }else if(notes&&note&&!notes.value&&!notes.dataset.userEdited){
+      notes.value=note;notes.dataset.currentStatePrefill=note;
+    }
+    if(typeof updateFinishState==='function')updateFinishState();
+  }
+  function stateFromInspection(d){
+    const i=d&&d.inspection||{};
+    const supplied=d&&d.currentDamage||{};
+    const active=supplied.active===true||i.CurrentDamageActive===true;
+    return {
+      active,
+      category:String(supplied.category||i.CurrentDamageCategory||''),
+      severity:String(supplied.severity||i.CurrentDamageSeverity||'Medium'),
+      reason:String(supplied.reason||i.CurrentDamageReason||'')
+    };
+  }
+  function applyPayloadState(d){
+    if(!d||!d.inspection)return;
+    const state=stateFromInspection(d);
+    const note=String(d.currentNote||d.inspection.CurrentVanNote||state.reason||'').trim();
+    setDamageUi(state,note);
+  }
+  async function loadVanState(force){
+    const vanId=currentVanId();
+    if(!vanId||loading)return;
     if(!force&&vanId===lastVanId)return;
-    lastVanId=vanId;
+    lastVanId=vanId;loading=true;
     try{
       const result=await window.AAXI_FIREBASE.request('/v1/van-note/'+encodeURIComponent(vanId),{method:'GET',timeout:15000});
       if(currentVanId()!==vanId)return;
-      const note=String(result&&result.note||'').trim();
-      lastSaved=note;
-      box.innerHTML=note?'<span style="font-weight:800">Van note:</span> '+escapeHtml(note):'';
-      box.hidden=!note;
-    }catch(error){
-      console.warn('[Van note] could not load',error);
-      box.hidden=true;
+      setDamageUi(result&&result.currentDamage||{},String(result&&result.note||'').trim());
+    }catch(error){console.warn('[Current van state] could not load',error)}
+    finally{loading=false}
+  }
+  function bindNotes(){
+    const input=document.getElementById('inspectionNotes');
+    if(input&&!input.dataset.currentStateBound){
+      input.dataset.currentStateBound='1';
+      input.addEventListener('input',()=>{input.dataset.userEdited='1'});
     }
   }
-  async function saveVanNote(){
-    const vanId=currentVanId(),input=document.getElementById('inspectionNotes');
-    if(!vanId||!input)return;
-    const note=String(input.value||'').trim();
-    if(note===lastSaved)return;
-    try{
-      await window.AAXI_FIREBASE.request('/v1/van-note/'+encodeURIComponent(vanId),{method:'PATCH',body:{note},timeout:15000});
-      lastSaved=note;
-      const box=ensureBox();
-      if(box){box.innerHTML=note?'<span style="font-weight:800">Van note:</span> '+escapeHtml(note):'';box.hidden=!note}
-    }catch(error){console.warn('[Van note] could not save',error)}
+  function patchUi(){
+    if(typeof window.renderInspection==='function'&&!window.renderInspection.__currentStatePatched){
+      const original=window.renderInspection;
+      const patched=function(d){const result=original.apply(this,arguments);bindNotes();applyPayloadState(d);setTimeout(()=>loadVanState(false),0);return result};
+      patched.__currentStatePatched=true;window.renderInspection=patched;
+    }
+    if(typeof window.renderSpotOptions==='function'&&!window.renderSpotOptions.__occupiedPatch){
+      const patched=function(spots,selected){
+        const station=document.getElementById('vanLocation').value,wrap=document.getElementById('spotWrap'),select=document.getElementById('spot');
+        wrap.style.display=station==='SHOP'||isTransferMode()?'none':'grid';
+        const vanId=currentVanId();
+        select.innerHTML='<option value="">Select available spot</option>'+((spots||[]).map(s=>{
+          const occupied=String(s.OccupiedByVanID||''),owner=(DATA.vans||[]).find(v=>String(v.VanID||'')===occupied),ownerName=owner?String(owner.VanNumber||owner.VanID):occupied;
+          const label=String(s.Spot||'')+(occupied&&occupied!==vanId?' — Van '+ownerName:'');
+          return '<option value="'+esc(s.SpotID)+'" '+(String(s.Spot)===String(selected)?'selected':'')+'>'+esc(label)+'</option>';
+        }).join(''));
+      };
+      patched.__occupiedPatch=true;window.renderSpotOptions=patched;
+    }
+    if(typeof window.spotDraftChanged==='function'&&!window.spotDraftChanged.__swapPatch){
+      const original=window.spotDraftChanged;
+      const patched=function(){
+        if(!CURRENT)return original.apply(this,arguments);
+        const select=document.getElementById('spot'),spotId=String(select.value||''),draft=CURRENT.locationDraft||{},spots=draft.spots||[],selected=spots.find(s=>String(s.SpotID)===spotId),vanId=currentVanId();
+        const occupied=selected?String(selected.OccupiedByVanID||''):'';
+        if(occupied&&occupied!==vanId){
+          const owner=(DATA.vans||[]).find(v=>String(v.VanID||'')===occupied),ownerName=owner?String(owner.VanNumber||owner.VanID):occupied;
+          const ok=confirm('Spot '+String(selected.Spot)+' is currently assigned to Van '+ownerName+'.\n\nDo you want to swap the Spots?');
+          if(!ok){select.value=String(draft.spotId||'');return}
+          draft.swapAccepted=true;
+        }
+        return original.apply(this,arguments);
+      };
+      patched.__swapPatch=true;window.spotDraftChanged=patched;
+    }
+    if(typeof window.damageChoiceChanged==='function'&&!window.damageChoiceChanged.__clearPatch){
+      const original=window.damageChoiceChanged;
+      const patched=function(e){
+        const result=original.apply(this,arguments),notes=document.getElementById('inspectionNotes');
+        if(e&&e.target&&e.target.value==='No'&&notes&&notes.dataset.currentStatePrefill&&notes.value===notes.dataset.currentStatePrefill){
+          notes.value='';delete notes.dataset.currentStatePrefill;delete notes.dataset.userEdited;
+        }
+        return result;
+      };
+      patched.__clearPatch=true;window.damageChoiceChanged=patched;
+    }
+    if(typeof window.renderVanInfoReasonBadges==='function'&&!window.renderVanInfoReasonBadges.__currentOnlyPatch){
+      const original=window.renderVanInfoReasonBadges;
+      const patched=function(){
+        if(!DATA||!Array.isArray(DATA.vans))return original.apply(this,arguments);
+        const hidden=[];
+        DATA.vans.forEach(v=>{if(String(v.CurrentNote||'').trim()&&!validCurrentNote(v)){hidden.push([v,v.CurrentNote]);v.CurrentNote=''}});
+        try{return original.apply(this,arguments)}finally{hidden.forEach(([v,n])=>{v.CurrentNote=n})}
+      };
+      patched.__currentOnlyPatch=true;window.renderVanInfoReasonBadges=patched;
+    }
   }
-  function scheduleSave(){clearTimeout(saveTimer);saveTimer=setTimeout(saveVanNote,800)}
-  function bind(){
-    ensureBox();
-    const input=document.getElementById('inspectionNotes');
-    if(input&&!input.dataset.vanNoteBound){input.dataset.vanNoteBound='1';input.addEventListener('input',scheduleSave);input.addEventListener('change',scheduleSave)}
-    loadVanNote(false);
-  }
-  const observer=new MutationObserver(()=>bind());
-  document.addEventListener('DOMContentLoaded',()=>{bind();observer.observe(document.body,{subtree:true,childList:true,characterData:true,attributes:true,attributeFilter:['class']})});
-  window.addEventListener('focus',()=>loadVanNote(true));
+  function bind(){patchUi();bindNotes();loadVanState(false)}
+  document.addEventListener('DOMContentLoaded',()=>{
+    setTimeout(bind,0);
+    const observer=new MutationObserver(()=>bind());
+    observer.observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['class']});
+  });
+  window.addEventListener('focus',()=>loadVanState(true));
 })();
 </script>
