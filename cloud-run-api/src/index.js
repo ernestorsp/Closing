@@ -10,6 +10,7 @@ import { createMailer } from './mailer.js';
 import { createRpcRouter } from './rpc-router.js';
 import { createSyncService } from './sync-service.js';
 import { createVanInfoSync } from './van-info-sync.js';
+import { captureVanSpots, repairVanInfoSpotConflicts } from './van-info-spot-repair.js';
 import { allSelectableSpots, createInspectionPatchService } from './closing-inspection-patches.js';
 
 if (!getApps().length) {
@@ -66,16 +67,28 @@ let lastVanInfoSyncAt = 0;
 async function runVanInfoSync({ force = false } = {}) {
   if (!force && Date.now() - lastVanInfoSyncAt < 15000) return { ok: true, skipped: true, reason: 'RECENT_SYNC' };
   if (vanInfoSyncPromise) return vanInfoSyncPromise;
-  vanInfoSyncPromise = vanInfoSync.run()
-    .then(result => {
-      lastVanInfoSyncAt = Date.now();
-      return result;
-    })
+
+  vanInfoSyncPromise = (async () => {
+    const metadataRef = db.collection('syncMetadata').doc('vanInfo');
+    const beforeMetadataSnap = await metadataRef.get();
+    const beforeMetadata = beforeMetadataSnap.exists ? beforeMetadataSnap.data() : {};
+    const beforeFirestoreSpots = await captureVanSpots(db);
+
+    const result = await vanInfoSync.run();
+    const repair = await repairVanInfoSpotConflicts({ db, beforeMetadata, beforeFirestoreSpots });
+
+    // A repaired VAN_INFO conflict changes the displaced van in Firestore.
+    // Run the existing synchronizer once more so both vans are written back to VAN_INFO.
+    const followUp = repair.repaired > 0 ? await vanInfoSync.run() : null;
+    lastVanInfoSyncAt = Date.now();
+    return { ...result, repairedSpotSwaps: repair.repaired, followUp };
+  })()
     .catch(error => {
       console.warn('[VAN_INFO sync]', error?.message || error);
       return { ok: false, error: error?.message || String(error) };
     })
     .finally(() => { vanInfoSyncPromise = null; });
+
   return vanInfoSyncPromise;
 }
 
@@ -145,7 +158,7 @@ app.use('/v1/rpc', async (req, _res, next) => {
   } catch (_error) { next(); }
 });
 
-// Occupied spots remain selectable. The actual conflict is resolved atomically by the patched FINISH_INSPECTION flow.
+// Occupied spots remain selectable. The actual conflict is resolved by the patched inspection transaction.
 app.post('/v1/rpc/getAvailableSpots', requireAuth, async (req, res, next) => {
   try {
     const args = Array.isArray(req.body?.args) ? req.body.args : [];
