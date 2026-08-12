@@ -9,6 +9,7 @@ import { apiError, docData, serialize, text } from './domain.js';
 import { createMailer } from './mailer.js';
 import { createRpcRouter } from './rpc-router.js';
 import { createSyncService } from './sync-service.js';
+import { allSelectableSpots, createInspectionPatchService } from './closing-inspection-patches.js';
 
 if (!getApps().length) {
   initializeApp({
@@ -55,7 +56,8 @@ async function requireAuth(req, _res, next) {
 }
 
 const sendClosingNotes = createClosingNotesSender({ db, bucket, mailer });
-const syncService = createSyncService({ db, sendClosingNotes });
+const baseSyncService = createSyncService({ db, sendClosingNotes });
+const syncService = createInspectionPatchService({ db, baseSyncService });
 
 app.get('/healthz', (_req, res) => res.json({ ok: true, service: 'aaxi-closing-api', backend: 'firebase', time: new Date().toISOString() }));
 
@@ -71,7 +73,24 @@ app.get('/v1/van-note/:vanId', requireAuth, async (req, res, next) => {
     if (!vanId) throw apiError(400, 'INVALID_VAN', 'Van ID is required.');
     const snapshot = await db.collection('vans').doc(vanId).get();
     if (!snapshot.exists) throw apiError(404, 'VAN_NOT_FOUND', 'Van not found.');
-    res.json({ ok: true, vanId, note: text(snapshot.get('CurrentNote') || snapshot.get('VanInfoReason') || '', 5000) });
+    const source = text(snapshot.get('CurrentNoteSource') || '', 30).toUpperCase();
+    const storedNote = text(snapshot.get('CurrentNote') || snapshot.get('VanInfoReason') || '', 5000).trim();
+    const explicitDamage = snapshot.get('CurrentDamageActive') === true;
+    const legacyDamage = source === 'DAMAGE' && Boolean(storedNote);
+    const damageActive = explicitDamage || legacyDamage;
+    const note = source === 'VAN_INFO' || damageActive ? storedNote : '';
+    res.json({
+      ok: true,
+      vanId,
+      note,
+      source,
+      currentDamage: {
+        active: damageActive,
+        category: damageActive ? text(snapshot.get('CurrentDamageCategory') || '', 100) : '',
+        severity: damageActive ? text(snapshot.get('CurrentDamageSeverity') || 'Medium', 30) : '',
+        reason: damageActive ? storedNote : ''
+      }
+    });
   } catch (error) { next(error); }
 });
 
@@ -79,12 +98,23 @@ app.patch('/v1/van-note/:vanId', requireAuth, async (req, res, next) => {
   try {
     const vanId = text(req.params.vanId, 160).trim();
     if (!vanId) throw apiError(400, 'INVALID_VAN', 'Van ID is required.');
-    const note = text(req.body?.note || '', 5000).trim();
     const ref = db.collection('vans').doc(vanId);
     const snapshot = await ref.get();
     if (!snapshot.exists) throw apiError(404, 'VAN_NOT_FOUND', 'Van not found.');
-    await ref.set({ CurrentNote: note, VanInfoReason: note, NoteUpdatedAt: FieldValue.serverTimestamp(), NoteUpdatedByUid: req.user.uid, NoteUpdatedByEmail: req.user.email || '' }, { merge: true });
-    res.json({ ok: true, vanId, note });
+    // General Closing notes must never overwrite VAN_INFO/current van notes.
+    // Only SAVE_DAMAGE and explicit No Damage cleanup are allowed to change current Damage/Note state.
+    const source = text(snapshot.get('CurrentNoteSource') || '', 30).toUpperCase();
+    const storedNote = text(snapshot.get('CurrentNote') || snapshot.get('VanInfoReason') || '', 5000).trim();
+    res.json({ ok: true, vanId, note: source === 'VAN_INFO' || snapshot.get('CurrentDamageActive') === true ? storedNote : '', ignored: true });
+  } catch (error) { next(error); }
+});
+
+// Occupied spots remain selectable. The actual conflict is resolved atomically by the patched FINISH_INSPECTION flow.
+app.post('/v1/rpc/getAvailableSpots', requireAuth, async (req, res, next) => {
+  try {
+    const args = Array.isArray(req.body?.args) ? req.body.args : [];
+    const spots = await allSelectableSpots(db, args[0]);
+    res.json({ ok: true, result: serialize(spots) });
   } catch (error) { next(error); }
 });
 
