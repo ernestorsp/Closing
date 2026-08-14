@@ -38,10 +38,6 @@ function normalizeBag(value) {
   return clean(value, 100);
 }
 
-function normalizeNote(value) {
-  return clean(value, 5000);
-}
-
 function activeVan(van) {
   return van.Active !== false && van.active !== false;
 }
@@ -64,8 +60,7 @@ function firestoreState(van) {
   return {
     spot: normalizeSpot(van.CurrentStation === 'SHOP' ? 'SHOP' : van.CurrentSpot),
     bag: normalizeBag(van.BagNumber || van.Bag || ''),
-    status: normalizeStatus(van.CurrentStatus || 'Operational') || 'Operational',
-    note: normalizeNote(van.CurrentNote || van.Note || van.Reason || '')
+    status: normalizeStatus(van.CurrentStatus || 'Operational') || 'Operational'
   };
 }
 
@@ -73,8 +68,7 @@ function sheetState(row) {
   return {
     spot: normalizeSpot(row[0]),
     bag: normalizeBag(row[2]),
-    status: normalizeStatus(row[4]),
-    note: normalizeNote(row[5])
+    status: normalizeStatus(row[4])
   };
 }
 
@@ -268,7 +262,7 @@ export function createVanInfoSync({ db }) {
         row[2] = fire.bag;       // C Bag
         row[3] = vanType;        // D Size
         row[4] = fire.status;    // E Status
-        row[5] = fire.note;      // F Reason / Note
+        // Column F (Reason / Note) is intentionally not synchronized.
         row[9] = vanType;        // J Type
         row[10] = vin;           // K VIN
 
@@ -373,30 +367,6 @@ export function createVanInfoSync({ db }) {
           initial
         });
 
-        const damageNotePending = van.VanInfoDamageNotePending === true;
-
-        let resolvedNote;
-
-        if (damageNotePending) {
-          resolvedNote = {
-            fire: fire.note,
-            sheet: fire.note,
-            action: equal(fire.note, external.note) ? 'none' : 'fire_to_sheet'
-          };
-        } else if (!equal(external.note, fire.note)) {
-          resolvedNote = {
-            fire: external.note,
-            sheet: external.note,
-            action: 'sheet_to_fire'
-          };
-        } else {
-          resolvedNote = {
-            fire: fire.note,
-            sheet: external.note,
-            action: 'none'
-          };
-        }
-
         const firePatch = {};
 
         if (resolvedSpot.action === 'sheet_to_fire') {
@@ -414,13 +384,6 @@ export function createVanInfoSync({ db }) {
           resolvedStatus.fire
         ) {
           firePatch.CurrentStatus = resolvedStatus.fire;
-          sheetToFirestore++;
-        }
-
-        if (resolvedNote.action === 'sheet_to_fire') {
-          firePatch.CurrentNote = resolvedNote.fire;
-          firePatch.CurrentNoteSource = 'VAN_INFO';
-          firePatch.VanInfoDamageNotePending = false;
           sheetToFirestore++;
         }
 
@@ -449,26 +412,6 @@ export function createVanInfoSync({ db }) {
             range: `'${sheetName}'!E${sheetRecord.rowNumber}`,
             values: [[resolvedStatus.sheet]]
           });
-          firestoreToSheet++;
-        }
-
-        if (resolvedNote.action === 'fire_to_sheet') {
-          sheetUpdates.push({
-            range: `'${sheetName}'!F${sheetRecord.rowNumber}`,
-            values: [[resolvedNote.sheet]]
-          });
-
-          const currentPatch = firestoreUpdates.get(
-            van._documentId || vin
-          ) || {};
-
-          currentPatch.VanInfoDamageNotePending = false;
-          currentPatch.CurrentNoteSource = 'DAMAGE';
-
-          firestoreUpdates.set(
-            van._documentId || vin,
-            currentPatch
-          );
           firestoreToSheet++;
         }
 
@@ -506,15 +449,13 @@ export function createVanInfoSync({ db }) {
         nextFirestoreSnapshot[vin] = {
           spot: resolvedSpot.fire,
           bag: resolvedBag.fire,
-          status: resolvedStatus.fire,
-          note: resolvedNote.fire
+          status: resolvedStatus.fire
         };
 
         nextSheetSnapshot[vin] = {
           spot: resolvedSpot.sheet,
           bag: resolvedBag.sheet,
-          status: resolvedStatus.sheet,
-          note: resolvedNote.sheet
+          status: resolvedStatus.sheet
         };
       }
 
