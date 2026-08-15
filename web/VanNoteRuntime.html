@@ -14,7 +14,7 @@
     if(!van)return'';
     const note=String(van.CurrentNote||'').trim(),source=String(van.CurrentNoteSource||'').toUpperCase();
     if(!note)return'';
-    if(source==='VAN_INFO')return note;
+    if(source==='VAN_INFO')return '';
     if((source==='DAMAGE'||!source)&&van.CurrentDamageActive===true)return note;
     return'';
   }
