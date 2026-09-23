@@ -60,7 +60,10 @@ async function requireAuth(req, _res, next) {
 const sendClosingNotes = createClosingNotesSender({ db, bucket, mailer });
 const baseSyncService = createSyncService({ db, sendClosingNotes });
 const syncService = createInspectionPatchService({ db, baseSyncService });
-const vanInfoSync = createVanInfoSync({ db });
+const vanInfoSyncs = [
+  { station: 'DJX3', metadataId: 'vanInfo', sync: createVanInfoSync({ db, station: 'DJX3', metadataId: 'vanInfo' }) },
+  { station: 'DJX4', metadataId: 'vanInfo_DJX4', sync: createVanInfoSync({ db, station: 'DJX4', metadataId: 'vanInfo_DJX4' }) }
+];
 let vanInfoSyncPromise = null;
 let lastVanInfoSyncAt = 0;
 
@@ -69,19 +72,30 @@ async function runVanInfoSync({ force = false } = {}) {
   if (vanInfoSyncPromise) return vanInfoSyncPromise;
 
   vanInfoSyncPromise = (async () => {
-    const metadataRef = db.collection('syncMetadata').doc('vanInfo');
-    const beforeMetadataSnap = await metadataRef.get();
-    const beforeMetadata = beforeMetadataSnap.exists ? beforeMetadataSnap.data() : {};
-    const beforeFirestoreSpots = await captureVanSpots(db);
+    const results = {};
 
-    const result = await vanInfoSync.run();
-    const repair = await repairVanInfoSpotConflicts({ db, beforeMetadata, beforeFirestoreSpots });
+    for (const config of vanInfoSyncs) {
+      const metadataRef = db.collection('syncMetadata').doc(config.metadataId);
+      const beforeMetadataSnap = await metadataRef.get();
+      const beforeMetadata = beforeMetadataSnap.exists ? beforeMetadataSnap.data() : {};
+      const beforeFirestoreSpots = await captureVanSpots(db);
 
-    // A repaired VAN_INFO conflict changes the displaced van in Firestore.
-    // Run the existing synchronizer once more so both vans are written back to VAN_INFO.
-    const followUp = repair.repaired > 0 ? await vanInfoSync.run() : null;
+      const result = await config.sync.run();
+      const repair = await repairVanInfoSpotConflicts({
+        db,
+        beforeMetadata,
+        beforeFirestoreSpots,
+        metadataId: config.metadataId
+      });
+
+      // A repaired VAN_INFO conflict changes the displaced van in Firestore.
+      // Run this station once more so both vans are written back to its VAN_INFO.
+      const followUp = repair.repaired > 0 ? await config.sync.run() : null;
+      results[config.station] = { ...result, repairedSpotSwaps: repair.repaired, followUp };
+    }
+
     lastVanInfoSyncAt = Date.now();
-    return { ...result, repairedSpotSwaps: repair.repaired, followUp };
+    return { ok: true, stations: results };
   })()
     .catch(error => {
       console.warn('[VAN_INFO sync]', error?.message || error);
