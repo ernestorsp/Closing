@@ -10,6 +10,7 @@ import { createMailer } from './mailer.js';
 import { createRpcRouter } from './rpc-router.js';
 import { createSyncService } from './sync-service.js';
 import { createVanInfoSync } from './van-info-sync.js';
+import { createDjx4FleetSync } from './djx4-fleet-sync.js';
 import { captureVanSpots, repairVanInfoSpotConflicts } from './van-info-spot-repair.js';
 import { allSelectableSpots, createInspectionPatchService } from './closing-inspection-patches.js';
 
@@ -60,6 +61,7 @@ async function requireAuth(req, _res, next) {
 const sendClosingNotes = createClosingNotesSender({ db, bucket, mailer });
 const baseSyncService = createSyncService({ db, sendClosingNotes });
 const syncService = createInspectionPatchService({ db, baseSyncService });
+const djx4FleetSync = createDjx4FleetSync({ db });
 const vanInfoSyncs = [
   { station: 'DJX3', metadataId: 'vanInfo', sync: createVanInfoSync({ db, station: 'DJX3', metadataId: 'vanInfo' }) },
   { station: 'DJX4', metadataId: 'vanInfo_DJX4', sync: createVanInfoSync({ db, station: 'DJX4', metadataId: 'vanInfo_DJX4' }) }
@@ -73,6 +75,14 @@ async function runVanInfoSync({ force = false } = {}) {
 
   vanInfoSyncPromise = (async () => {
     const results = {};
+    // DJX4 Fleet and Closing are the authoritative pair for status/reason.
+    // Resolve them first; DJX4 VAN_INFO is written afterward as a projection.
+    try {
+      results.DJX4_FLEET = await djx4FleetSync.run();
+    } catch (error) {
+      console.warn('[DJX4 Fleet sync]', error?.message || error);
+      results.DJX4_FLEET = { ok: false, error: error?.message || String(error) };
+    }
 
     for (const config of vanInfoSyncs) {
       const metadataRef = db.collection('syncMetadata').doc(config.metadataId);
@@ -110,6 +120,13 @@ setInterval(() => { runVanInfoSync({ force: true }).catch(() => {}); }, 60000).u
 
 app.get('/healthz', (_req, res) => res.json({ ok: true, service: 'aaxi-closing-api', backend: 'firebase', time: new Date().toISOString() }));
 
+// Existing scheduler calls this route every minute. It performs no user mutation other than
+// the configured Fleet/VAN_INFO synchronization and keeps the sync alive when the UI is closed.
+app.post('/v1/internal/van-info-sync', async (_req, res) => {
+  const result = await runVanInfoSync({ force: true });
+  res.json(result);
+});
+
 app.post('/v1/sync/apply', requireAuth, async (req, res, next) => {
   try {
     const result = await syncService.apply(req, req.body?.operation);
@@ -133,7 +150,7 @@ app.get('/v1/van-note/:vanId', requireAuth, async (req, res, next) => {
     const explicitDamage = snapshot.get('CurrentDamageActive') === true;
     const legacyDamage = source === 'DAMAGE' && Boolean(storedNote);
     const damageActive = explicitDamage || legacyDamage;
-    const note = source === 'VAN_INFO' || damageActive ? storedNote : '';
+    const note = ['VAN_INFO', 'FLEET'].includes(source) || damageActive ? storedNote : '';
     res.json({
       ok: true,
       vanId,
@@ -160,7 +177,7 @@ app.patch('/v1/van-note/:vanId', requireAuth, async (req, res, next) => {
     // Only SAVE_DAMAGE and explicit No Damage cleanup are allowed to change current Damage/Note state.
     const source = text(snapshot.get('CurrentNoteSource') || '', 30).toUpperCase();
     const storedNote = text(snapshot.get('CurrentNote') || snapshot.get('VanInfoReason') || '', 5000).trim();
-    res.json({ ok: true, vanId, note: source === 'VAN_INFO' || snapshot.get('CurrentDamageActive') === true ? storedNote : '', ignored: true });
+    res.json({ ok: true, vanId, note: ['VAN_INFO', 'FLEET'].includes(source) || snapshot.get('CurrentDamageActive') === true ? storedNote : '', ignored: true });
   } catch (error) { next(error); }
 });
 
