@@ -15,6 +15,9 @@
     const note=String(van.CurrentNote||'').trim(),source=String(van.CurrentNoteSource||'').toUpperCase();
     if(!note)return'';
     if(source==='VAN_INFO')return '';
+    // DJX4 Fleet issues are authoritative current notes and use the same
+    // existing note badges/UI as DJX3 current van notes.
+    if(source==='FLEET')return note;
     if((source==='DAMAGE'||!source)&&van.CurrentDamageActive===true)return note;
     return'';
   }
