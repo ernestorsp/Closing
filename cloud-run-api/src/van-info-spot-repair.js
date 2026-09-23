@@ -28,10 +28,10 @@ export async function captureVanSpots(db) {
   return result;
 }
 
-export async function repairVanInfoSpotConflicts({ db, beforeMetadata = {}, beforeFirestoreSpots = {} }) {
+export async function repairVanInfoSpotConflicts({ db, beforeMetadata = {}, beforeFirestoreSpots = {}, metadataId = 'vanInfo' }) {
   if (!beforeMetadata.initialized) return { repaired: 0 };
 
-  const metadataSnap = await db.collection('syncMetadata').doc('vanInfo').get();
+  const metadataSnap = await db.collection('syncMetadata').doc(metadataId).get();
   if (!metadataSnap.exists) return { repaired: 0 };
   const afterMetadata = metadataSnap.data() || {};
 
@@ -76,14 +76,17 @@ export async function repairVanInfoSpotConflicts({ db, beforeMetadata = {}, befo
     const sheetChanged = afterSheet !== priorSheet;
     if (!sheetChanged || appChangedBeforeSync || !afterSheet || afterSheet === 'SHOP') continue;
 
-    const owners = (bySpot.get(afterSheet) || []).filter(other => normalizeVin(other.VanID || other._documentId) !== id);
+    const selectedStation = upper(van.CurrentStation, 20);
+    const owners = (bySpot.get(afterSheet) || []).filter(other =>
+      normalizeVin(other.VanID || other._documentId) !== id &&
+      upper(other.CurrentStation, 20) === selectedStation
+    );
     if (!owners.length) continue;
     const owner = owners[0];
     const ownerId = normalizeVin(owner.VanID || owner._documentId);
     if (!ownerId || handled.has(ownerId)) continue;
 
     const oldSpot = priorFire && priorFire !== 'SHOP' ? priorFire : '';
-    const selectedStation = upper(van.CurrentStation, 20);
     const ownerStation = upper(owner.CurrentStation, 20);
     const targetSpotRef = spotRefs.get(`${selectedStation}|${afterSheet}`) || null;
     const oldSpotRef = oldSpot && selectedStation === ownerStation
