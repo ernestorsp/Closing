@@ -63,7 +63,8 @@ function firestoreState(van) {
   return {
     spot: normalizeSpot(van.CurrentStation === 'SHOP' ? 'SHOP' : van.CurrentSpot),
     bag: normalizeBag(van.BagNumber || van.Bag || ''),
-    status: normalizeStatus(van.CurrentStatus || 'Operational') || 'Operational'
+    status: normalizeStatus(van.CurrentStatus || 'Operational') || 'Operational',
+    reason: clean(van.CurrentNote || van.VanInfoReason || '', 5000)
   };
 }
 
@@ -71,7 +72,8 @@ function sheetState(row) {
   return {
     spot: normalizeSpot(row[0]),
     bag: normalizeBag(row[2]),
-    status: normalizeStatus(row[4])
+    status: normalizeStatus(row[4]),
+    reason: clean(row[5], 5000)
   };
 }
 
@@ -270,7 +272,7 @@ export function createVanInfoSync({ db, station = 'DJX3', spreadsheetId: configu
         row[2] = fire.bag;       // C Bag
         row[3] = vanType;        // D Size
         row[4] = fire.status;    // E Status
-        // Column F (Reason / Note) is intentionally not synchronized.
+        if (targetStation === 'DJX4') row[5] = fire.reason; // F Reason is output-only for DJX4.
         row[9] = vanType;        // J Type
         row[10] = vin;           // K VIN
 
@@ -351,7 +353,16 @@ export function createVanInfoSync({ db, station = 'DJX3', spreadsheetId: configu
         const priorFire = previousFirestore[vin] || {};
         const priorSheet = previousSheet[vin] || {};
 
-        const resolvedSpot = resolveField({
+        const outputOnly = targetStation === 'DJX4';
+        const outbound = (fireValue, sheetValue) => ({
+          fire: fireValue,
+          sheet: fireValue,
+          action: equal(fireValue, sheetValue) ? 'none' : 'fire_to_sheet'
+        });
+
+        // DJX4 VAN_INFO is a projection only: manual edits there never update Closing.
+        // DJX3 keeps its existing bidirectional behavior.
+        const resolvedSpot = outputOnly ? outbound(fire.spot, external.spot) : resolveField({
           fire: fire.spot,
           sheet: external.spot,
           previousFire: priorFire.spot,
@@ -359,7 +370,7 @@ export function createVanInfoSync({ db, station = 'DJX3', spreadsheetId: configu
           initial
         });
 
-        const resolvedBag = resolveField({
+        const resolvedBag = outputOnly ? outbound(fire.bag, external.bag) : resolveField({
           fire: fire.bag,
           sheet: external.bag,
           previousFire: priorFire.bag,
@@ -367,13 +378,19 @@ export function createVanInfoSync({ db, station = 'DJX3', spreadsheetId: configu
           initial
         });
 
-        const resolvedStatus = resolveField({
+        const resolvedStatus = outputOnly ? outbound(fire.status, external.status) : resolveField({
           fire: fire.status,
           sheet: external.status,
           previousFire: priorFire.status,
           previousSheet: priorSheet.status,
           initial
         });
+
+        const resolvedReason = outputOnly ? outbound(fire.reason, external.reason) : {
+          fire: fire.reason,
+          sheet: external.reason,
+          action: 'none'
+        };
 
         const firePatch = {};
 
@@ -423,6 +440,14 @@ export function createVanInfoSync({ db, station = 'DJX3', spreadsheetId: configu
           firestoreToSheet++;
         }
 
+        if (resolvedReason.action === 'fire_to_sheet') {
+          sheetUpdates.push({
+            range: `'${sheetName}'!F${sheetRecord.rowNumber}`,
+            values: [[resolvedReason.sheet]]
+          });
+          firestoreToSheet++;
+        }
+
         const desiredNumber = clean(van.VanNumber || '', 100);
         const desiredType = clean(van.VanType || van.Type || '', 100);
 
@@ -457,13 +482,15 @@ export function createVanInfoSync({ db, station = 'DJX3', spreadsheetId: configu
         nextFirestoreSnapshot[vin] = {
           spot: resolvedSpot.fire,
           bag: resolvedBag.fire,
-          status: resolvedStatus.fire
+          status: resolvedStatus.fire,
+          reason: resolvedReason.fire
         };
 
         nextSheetSnapshot[vin] = {
           spot: resolvedSpot.sheet,
           bag: resolvedBag.sheet,
-          status: resolvedStatus.sheet
+          status: resolvedStatus.sheet,
+          reason: resolvedReason.sheet
         };
       }
 
