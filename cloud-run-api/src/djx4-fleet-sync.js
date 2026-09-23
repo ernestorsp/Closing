@@ -60,7 +60,12 @@ export function createDjx4FleetSync({ db }) {
       const initial = !metadataSnapshot.exists || !previous.initialized;
 
       const vans = vansSnapshot.docs.map(doc => ({ ...doc.data(), _documentId: doc.id, VanID: doc.data().VanID || doc.id }))
-        .filter(v => v.Active !== false && v.active !== false);
+        .filter(v => {
+          if (v.Active === false || v.active === false) return false;
+          const home = upper(v.HomeStation || v.homeStation || '', 20);
+          const current = upper(v.CurrentStation || v.currentStation || '', 20);
+          return current === 'DJX4' || (home === 'DJX4' && current === 'SHOP');
+        });
       const byVin = new Map();
       const byNumber = new Map();
       for (const van of vans) {
