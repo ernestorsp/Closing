@@ -4,6 +4,9 @@ import { FieldValue } from 'firebase-admin/firestore';
 const DEFAULT_SPREADSHEET_ID =
   '1veZ6qMIoK58t2O2-SIiaD2bbOk0iwhcGI4hmo2uLF1Y';
 
+const DEFAULT_DJX4_SPREADSHEET_ID =
+  '1aKhb_phXyH7rhgaZI7wA7iohwdmllKbSEVERhxP-ZZo';
+
 const DEFAULT_SHEET_NAME = 'VAN_INFO';
 
 function clean(value, max = 5000) {
@@ -42,18 +45,18 @@ function activeVan(van) {
   return van.Active !== false && van.active !== false;
 }
 
-function eligibleForVanInfo(van) {
+function eligibleForVanInfo(van, targetStation = 'DJX3') {
   if (!activeVan(van)) return false;
 
   const home = upper(van.HomeStation || van.homeStation || '', 20);
   const current = upper(van.CurrentStation || van.currentStation || '', 20);
 
-  // Rules:
-  // - Any van currently at DJX3 is included, even if its home station is DJX4.
-  // - DJX3-home vans at SHOP are included.
-  // - DJX4 vans at DJX4 are excluded.
-  // - DJX3-home vans currently at DJX4 are excluded.
-  return current === 'DJX3' || (home === 'DJX3' && current === 'SHOP');
+  // Each station has its own VAN_INFO:
+  // - Any van currently at the target station is included, regardless of home station.
+  // - Vans whose home is the target station remain included while at SHOP.
+  // - Vans currently assigned to the other station are excluded.
+  const target = upper(targetStation, 20);
+  return current === target || (home === target && current === 'SHOP');
 }
 
 function firestoreState(van) {
@@ -122,9 +125,14 @@ async function commitFirestoreUpdates(db, updates) {
   }
 }
 
-export function createVanInfoSync({ db }) {
+export function createVanInfoSync({ db, station = 'DJX3', spreadsheetId: configuredSpreadsheetId = '', metadataId = '' }) {
+  const targetStation = upper(station, 20) || 'DJX3';
   const spreadsheetId =
-    process.env.VAN_INFO_SPREADSHEET_ID || DEFAULT_SPREADSHEET_ID;
+    configuredSpreadsheetId ||
+    (targetStation === 'DJX4'
+      ? (process.env.VAN_INFO_DJX4_SPREADSHEET_ID || DEFAULT_DJX4_SPREADSHEET_ID)
+      : (process.env.VAN_INFO_SPREADSHEET_ID || DEFAULT_SPREADSHEET_ID));
+  const syncMetadataId = metadataId || (targetStation === 'DJX3' ? 'vanInfo' : `vanInfo_${targetStation}`);
 
   const sheetName =
     process.env.VAN_INFO_SHEET_NAME || DEFAULT_SHEET_NAME;
@@ -160,7 +168,7 @@ export function createVanInfoSync({ db }) {
         _documentId: doc.id
       }));
 
-      const eligibleVans = allVans.filter(eligibleForVanInfo);
+      const eligibleVans = allVans.filter(van => eligibleForVanInfo(van, targetStation));
 
       const eligibleByVin = new Map();
       const eligibleByNumber = new Map();
@@ -216,7 +224,7 @@ export function createVanInfoSync({ db }) {
         }
       });
 
-      const metadataRef = db.collection('syncMetadata').doc('vanInfo');
+      const metadataRef = db.collection('syncMetadata').doc(syncMetadataId);
       const metadataSnap = await metadataRef.get();
 
       const previous = metadataSnap.exists ? metadataSnap.data() : {};
@@ -482,6 +490,7 @@ export function createVanInfoSync({ db }) {
           sheet: nextSheetSnapshot,
           spreadsheetId,
           sheetName,
+          station: targetStation,
           eligibleVanCount: eligibleVans.length,
           duplicateVins,
           duplicateNumbers,
